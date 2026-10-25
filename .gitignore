@@ -1,0 +1,29 @@
+# Rust build artifacts
+target/
+
+# Databases and runtime generated configs
+*.db
+*.db-shm
+*.db-wal
+meow-config.yaml
+*.log
+
+# Temporary test scripts and artifacts
+_*.py
+_*.js
+_*.mjs
+_*.yaml
+down.txt
+NUL
+temp_*
+
+# Screenshots and browser debug directories
+*.png
+.chrome-*
+.chrome-tmp/
+
+# Environment and IDE
+.env
+.pi/
+.vscode/
+.idea/

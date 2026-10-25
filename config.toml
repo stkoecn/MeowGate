@@ -1,0 +1,70 @@
+# MeowGate (Clash 节点用户路由管理器) 配置
+
+[server]
+# 已废弃（仅兼容保留）：Web 界面不再单独监听端口，
+# 而是与 HTTP/SOCKS5 代理共用同一个对外端口 meow.gateway_port
+bind_addr = "0.0.0.0:8080"
+
+[database]
+# SQLite 凭证持久化数据库路径
+url = "sqlite://meowgate.db?mode=rwc"
+
+[clash]
+# Clash 内核 RESTful API 监听地址
+api_url = "http://127.0.0.1:9090"
+# Clash RESTful API Secret（若未设置留空）
+api_secret = ""
+# 自动嗅探本地 Clash 进程及订阅配置文件夹
+auto_detect_profiles = true
+# 降级备用 YAML 配置文件路径（当 API 无法连通时读取）
+# config_path = "clash-config.yaml"
+
+# 提示：点击管理界面中的“扫描本机配置”时，系统会自动将本地探测到的
+# 每个订阅文件（如 iKuuu_V2.yaml、vps.yaml 等）和正在运行的网关，分别作为单独的配置源加入列表。
+
+[[sources]]
+id = "default-clash-api"
+name = "本机 Clash REST API"
+source_type = "clash_api"
+target = "http://127.0.0.1:9090"
+enabled = false
+
+[meow]
+# meow-rs（mihomo 内核）控制 API 地址（仅绑定 127.0.0.1，仅供本机调用）
+api_url = "http://127.0.0.1:9091"
+# meow-rs RESTful API Secret
+api_secret = ""
+# 生成并写入的 meow-rs 目标配置文件路径
+config_output_path = "meow-config.yaml"
+# 可选的基础模板配置文件路径（保留用户的额外设置）
+# base_config_path = "meow-base.yaml"
+# 唯一的“对外”端口：Web 管理界面 + HTTP/SOCKS5 代理共用（按首包自动分流）
+gateway_port = 9565
+# 网关监听网卡（绑定 0.0.0.0 开放局域网/公网访问）
+gateway_bind = "0.0.0.0"
+# 内核内部 mixed 入站端口（仅绑定 127.0.0.1，不对局域网开放；
+# 网关会把代理流量转发到这里，所以外部只需记住 gateway_port 一个端口）
+mixed_port = 9567
+# 默认兜底策略组或节点（若节点列表为空）
+default_target = "DIRECT"
+
+# 自动定时同步 Clash 节点并刷新 meow 配置（秒，0 表示仅手动同步）
+auto_refresh_secs = 0
+
+[health]
+# 节点健康巡检与自动上下线（分级调度，降低性能开销）
+enabled = true
+# 巡检间隔（秒）：通过的健康节点每 5 分钟（300秒）检查一次
+interval_secs = 300
+# 单节点探测超时（毫秒）
+timeout_ms = 2500
+# 连续失败 N 次后判定下线（从所有代理组移除，转入 10 分钟复查队列）
+fail_threshold = 2
+# 连续成功 N 次后判定恢复上线（加入到通过节点当中）
+recover_threshold = 1
+# 故障节点复查间隔（秒）：不通过的节点每 10 分钟（600秒）复查一次
+down_retry_secs = 600
+# 并发探测数
+concurrency = 32
+# 健康检查目标 URL（Cloudflare Anycast 全球低延时节点）
+test_url = "http://cp.cloudflare.com/generate_204"

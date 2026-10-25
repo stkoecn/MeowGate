@@ -195,8 +195,33 @@ impl HealthMonitor {
     }
 
     pub async fn set_policy(&self, policy: HealthPolicy) {
-        let mut p = self.policy.write().await;
-        *p = policy;
+        let interval_changed = {
+            let mut p = self.policy.write().await;
+            let changed = p.interval_secs != policy.interval_secs || p.down_retry_secs != policy.down_retry_secs;
+            *p = policy.clone();
+            changed
+        };
+
+        // If interval or down retry changed, immediately reschedule existing nodes
+        // so the new timing takes effect right now instead of waiting for the old timer!
+        if interval_changed {
+            let now = chrono::Utc::now();
+            let mut guard = self.states.write().await;
+            for n in guard.values_mut() {
+                if let Some(last) = n.last_checked_at {
+                    if n.state.is_available() {
+                        let target = last + chrono::Duration::seconds(policy.interval_secs as i64);
+                        n.next_check_at = Some(target);
+                    } else {
+                        let retry_secs = if policy.down_retry_secs > 0 { policy.down_retry_secs } else { policy.interval_secs };
+                        let down_target = last + chrono::Duration::seconds(retry_secs as i64);
+                        n.next_check_at = Some(down_target);
+                    }
+                } else {
+                    n.next_check_at = Some(now);
+                }
+            }
+        }
     }
 
     pub async fn all_states(&self) -> Vec<NodeHealth> {

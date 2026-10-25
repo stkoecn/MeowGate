@@ -217,8 +217,9 @@ impl TemplateRenderer {
             .filter(|n| !unavailable.contains(&n.name))
             .collect();
 
-        // Group "🚀 节点选择": primary selector for dashboards and unauthenticated traffic
-        writeln!(out, "  - name: 🚀 节点选择").unwrap();
+        // Group "🚀 节点选择": primary selector for dashboards and unauthenticated traffic (with update timestamp)
+        let main_selector_name = Self::format_main_selector_name();
+        writeln!(out, "  - name: {}", Self::format_yaml_str(&main_selector_name)).unwrap();
         writeln!(out, "    type: select").unwrap();
         writeln!(out, "    proxies:").unwrap();
         // Place fast speed group and lv1 as top choices in 🚀 节点选择
@@ -500,8 +501,9 @@ impl TemplateRenderer {
             }
         }
 
-        // 5e. Guest unauthenticated rule: routes to 🚀 节点选择 group (just like native Clash)
-        writeln!(out, "  - IN-USER,guest,🚀 节点选择").unwrap();
+        // 5e. Guest unauthenticated rule: routes to dynamic 🚀 节点选择 group
+        let guest_rule = format!("IN-USER,guest,{}", main_selector_name);
+        writeln!(out, "{}", Self::format_yaml_rule(&guest_rule)).unwrap();
 
         // Base config extra rules, or default MATCH fallback
         let mut has_base_rules = false;
@@ -520,7 +522,7 @@ impl TemplateRenderer {
 
         if !has_base_rules {
             let match_target = if !routable.is_empty() {
-                "🚀 节点选择"
+                main_selector_name.as_str()
             } else {
                 default_target
             };
@@ -608,6 +610,12 @@ impl TemplateRenderer {
     }
 
     /// Formats a single rule line in `rules:`.
+    /// Formats the main selector group name with Beijing time (UTC+8) timestamp, e.g. "🚀 节点选择 (10-25 14:05)"
+    pub fn format_main_selector_name() -> String {
+        let beijing_time = chrono::Utc::now() + chrono::Duration::hours(8);
+        format!("🚀 节点选择 ({})", beijing_time.format("%m-%d %H:%M"))
+    }
+
     pub fn format_yaml_rule(rule: &str) -> String {
         if rule.contains(": ") || rule.contains('#') || rule.contains('"') || rule.contains('\'') {
             format!("  - {}", Self::escape_yaml_str(rule))
@@ -716,8 +724,9 @@ impl TemplateRenderer {
             .filter(|n| !unavailable.contains(&n.name))
             .collect();
 
-        // 4a. Primary 🚀 节点选择 selector
-        writeln!(out, "  - name: 🚀 节点选择").unwrap();
+        // 4a. Primary 🚀 节点选择 selector (with update timestamp)
+        let main_selector_name = Self::format_main_selector_name();
+        writeln!(out, "  - name: {}", Self::format_yaml_str(&main_selector_name)).unwrap();
         writeln!(out, "    type: select").unwrap();
         writeln!(out, "    proxies:").unwrap();
         // Place fast speed group and lv1 as top choices in 🚀 节点选择
@@ -909,7 +918,8 @@ impl TemplateRenderer {
         }
 
         if !has_base_rules {
-            writeln!(out, "  - MATCH,🚀 节点选择").unwrap();
+            let match_rule = format!("MATCH,{}", main_selector_name);
+            writeln!(out, "  - {}", match_rule).unwrap();
         }
 
         Ok(out)

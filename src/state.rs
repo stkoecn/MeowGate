@@ -94,6 +94,7 @@ impl AppState {
         state.load_persisted_probes().await;
         state.load_persisted_health().await;
         state.load_persisted_traffic().await;
+        state.load_persisted_health_policy().await;
 
         // Seed health records for every known node so the first sweep is complete
         {
@@ -791,9 +792,28 @@ impl AppState {
         Ok(changed)
     }
 
-    /// Applies a new health policy (called from the settings API).
+    /// Applies a new health policy (called from the settings API) and saves to SQLite.
     pub async fn update_health_policy(&self, policy: crate::config::HealthPolicy) {
-        self.health.set_policy(policy).await;
+        self.health.set_policy(policy.clone()).await;
+        if let Ok(json_str) = serde_json::to_string(&policy) {
+            let _ = self.db.save_setting("health_policy", &json_str).await;
+        }
+    }
+
+    /// Restores any previously saved health policy from SQLite so user custom intervals persist across restarts.
+    pub async fn load_persisted_health_policy(&self) {
+        if let Ok(Some(json_str)) = self.db.get_setting("health_policy").await {
+            if let Ok(saved_policy) = serde_json::from_str::<crate::config::HealthPolicy>(&json_str) {
+                tracing::info!(
+                    "Restored custom health policy from database: interval={}s, down_retry={}s, timeout={}ms, fail_threshold={}",
+                    saved_policy.interval_secs,
+                    saved_policy.down_retry_secs,
+                    saved_policy.timeout_ms,
+                    saved_policy.fail_threshold
+                );
+                self.health.set_policy(saved_policy).await;
+            }
+        }
     }
 
     /// Cancels the manual override and re-checks a single node immediately.

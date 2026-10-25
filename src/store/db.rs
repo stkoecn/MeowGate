@@ -77,6 +77,11 @@ impl Database {
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            );
             "#,
         )
         .execute(&pool)
@@ -88,6 +93,23 @@ impl Database {
             .await;
 
         Ok(Self { pool })
+    }
+
+    pub async fn save_setting(&self, key: &str, value: &str) -> Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT value FROM settings WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.get("value")))
     }
 
     pub async fn get_all_users(&self) -> Result<Vec<StoredUser>> {

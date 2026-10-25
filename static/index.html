@@ -1051,8 +1051,8 @@
       /* Mobile View Switcher: Segmented Control Bar */
       .view-switcher {
         display: grid !important;
-        grid-template-columns: repeat(4, 1fr) !important;
-        gap: 4px !important;
+        grid-template-columns: repeat(5, 1fr) !important;
+        gap: 3px !important;
         padding: 3px !important;
         background: var(--bg-subtle) !important;
         border-radius: 8px !important;
@@ -1443,6 +1443,10 @@
       <button @click="switchToLevelGroups()" :class="activeView === 'level_groups' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
         <i data-lucide="gauge" style="width: 13px; height: 13px; margin-right: 4px;"></i>分级分组
         <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="levelGroups.length"></span>
+      </button>
+      <button @click="switchToSpeedGroups()" :class="activeView === 'speed_groups' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
+        <i data-lucide="zap" style="width: 13px; height: 13px; margin-right: 4px;"></i>速度分组
+        <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="speedGroups.length"></span>
       </button>
     </div>
 
@@ -2761,6 +2765,226 @@
       </div>
     </div>
 
+    <!-- ===== SPEED GROUPS VIEW ===== -->
+    <div x-cloak x-show="activeView === 'speed_groups'" class="panel-card table-panel" style="overflow: hidden;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-panel); flex-shrink: 0; gap: 10px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 13px; font-weight: 600;"><i data-lucide="zap" style="width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; color: var(--accent);"></i>实测网速分组聚合</span>
+          <span class="text-dim" style="font-size: 11px;" x-text="'共 ' + speedGroups.length + ' 个梯队，覆盖 ' + speedGroupTotalNodes + ' 个节点'"></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="text" x-model.debounce.150ms="speedSearch" placeholder="搜索梯队或描述..." class="input-compact" style="width: 150px;">
+          <button @click="probeAllSpeedGroups()" class="btn-ghost" style="height: 26px; padding: 0 10px; font-size: 12px;" :disabled="isSpeedProbing" :class="{ 'pulse': isSpeedProbing }" title="探测所有速度梯队入口（自动账号）">
+            <i data-lucide="activity" style="width: 13px; height: 13px;" :class="{ 'spin': isSpeedProbing }"></i>
+            <span x-text="isSpeedProbing ? '探测中' : '探测全部'"></span>
+          </button>
+          <button @click="speedCards = !speedCards" class="btn-ghost" style="height: 26px; padding: 0 10px; font-size: 12px;" :title="speedCards ? '切换回表格视图' : '切换为卡片视图'">
+            <i data-lucide="layout-list" x-show="!speedCards" style="width: 12px; height: 12px;"></i>
+            <i data-lucide="table-2" x-show="speedCards" style="width: 12px; height: 12px;"></i>
+            <span x-text="speedCards ? '表格' : '卡片'"></span>
+          </button>
+          <button @click="fetchSpeedGroups()" class="btn-ghost" style="height: 26px; padding: 0 10px; font-size: 12px;" title="重新聚合">
+            <i data-lucide="refresh-cw" style="width: 13px; height: 13px;"></i>
+          </button>
+        </div>
+      </div>
+
+      <div style="padding: 8px 12px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0;">
+        根据各节点的历史实测带宽自动划分为不同速度梯队（高速 >2 MB/s、中速 500KB~2MB/s、低速 <500KB/s）。账号格式：<code class="font-mono" style="color: var(--accent);">fast / mid / slow</code> 自动测速选最快，<code class="font-mono" style="color: var(--accent);">fast-fb / mid-fb / slow-fb</code> 故障转移，密码与账号相同，支持大写（如 FAST / FAST-FB）。
+      </div>
+
+      <div class="table-scroll" :class="{ 'cards-on': speedCards }">
+        <table class="data-table regions-table">
+          <thead>
+            <tr>
+              <th style="width: 220px;">速度梯队 / 带宽区间</th>
+              <th style="width: 200px;">分流策略 / 凭证</th>
+              <th style="min-width: 240px;">当前盯住节点</th>
+              <th style="width: 115px;">连通性 (近10次)</th>
+              <th style="width: 190px;">实测网速 / 延时</th>
+              <th style="width: 110px; text-align: right;">操作</th>
+            </tr>
+          </thead>
+          <template x-if="filteredSpeedGroups.length === 0">
+            <tbody><tr><td colspan="6" style="height: 100px; text-align: center; color: var(--text-dim);">暂无速度分组数据，请先对节点完成测速</td></tr></tbody>
+          </template>
+          <template x-for="sg in filteredSpeedGroups" :key="sg.code">
+            <tbody class="region-pair">
+              <!-- Row 1: Auto -->
+              <tr class="region-row-auto">
+                <td rowspan="2" class="region-overview-cell">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;" :style="{ background: sg.color }"></span>
+                    <span class="font-mono" style="font-weight: 700; font-size: 15px; letter-spacing: 0.5px; color: var(--accent);" x-text="sg.code.toUpperCase()"></span>
+                    <span class="badge" style="font-size: 10px;" :style="{ borderColor: sg.color, color: sg.color }" x-text="sg.tag + ' · ' + sg.desc"></span>
+                  </div>
+                  <div class="text-dim" style="font-size: 11px; margin-top: 3px;" x-text="sg.node_count + ' 节点 · ' + sg.healthy_count + ' 存活'"></div>
+                  <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <template x-if="sg.avg_speed_formatted">
+                      <span class="badge font-mono" :style="{ borderColor: sg.color, color: sg.color }" x-text="'⚡ ' + sg.avg_speed_formatted"></span>
+                    </template>
+                    <template x-if="sg.avg_latency_ms">
+                      <span class="badge font-mono" style="font-size: 10px;" x-text="sg.avg_latency_ms + 'ms'"></span>
+                    </template>
+                  </div>
+                </td>
+                <td>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span class="region-strategy-badge badge-auto">自动切换</span>
+                    <code class="font-mono region-user-pill" x-text="sg.users[0].username" @click="copySpeedUser(sg, 0)" title="点击复制认证账号（密码相同）"></code>
+                  </div>
+                </td>
+                <td>
+                  <div class="region-target-node">
+                    <span class="target-radio-dot auto-dot">●</span>
+                    <span class="target-name font-mono" :title="sg.users[0].now || '内核正在测速选优中...'" x-text="sg.users[0].now || '自动选优中...'"></span>
+                  </div>
+                </td>
+                <td>
+                  <div class="probe-squares-bar" :title="speedHistoryTooltip(sg, 'auto')">
+                    <template x-for="(h, idx) in probeSquares(sg.probe)" :key="'s-h-' + idx">
+                      <span class="probe-square-dot"
+                            :style="{ background: probeSquareColor(h) }"
+                            :title="probeSquareDotTitle(h)"></span>
+                    </template>
+                  </div>
+                </td>
+                <td>
+                  <template x-if="sg.probe && (sg.probe.speed_formatted || sg.probe.latency_ms)">
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                      <template x-if="sg.probe.speed_formatted">
+                        <span class="badge font-mono" style="font-weight: 700; color: #10b981; border-color: #10b981;" x-text="'⚡ ' + sg.probe.speed_formatted"></span>
+                      </template>
+                      <template x-if="sg.probe.latency_ms">
+                        <span class="text-dim font-mono" style="font-size: 10px;" x-text="sg.probe.latency_ms + 'ms'"></span>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="!sg.probe || (!sg.probe.speed_formatted && !sg.probe.latency_ms)">
+                    <span class="text-dim font-mono" style="font-size: 11px;" x-text="sg.probe && sg.probe.error ? '失败' : '未测速'"></span>
+                  </template>
+                </td>
+                <td style="text-align: right;">
+                  <div class="action-btn-group">
+                    <button @click="copyText(sg.users[0].proxy, '已复制 ' + sg.users[0].username + ' 自动代理接入串')" :title="'复制 ' + sg.users[0].username + ' 代理接入串: ' + sg.users[0].proxy" class="btn-ghost" style="height: 24px; width: 26px; padding: 0; justify-content: center;">
+                      <i data-lucide="link" style="width: 13px; height: 13px;"></i>
+                    </button>
+                    <button @click="copyText(sg.users[0].curl, '已复制 ' + sg.users[0].username + ' cURL 测试命令')" :title="'复制 cURL: ' + sg.users[0].curl" class="btn-ghost" style="height: 24px; width: 26px; padding: 0; justify-content: center;">
+                      <i data-lucide="terminal" style="width: 13px; height: 13px;"></i>
+                    </button>
+                    <button @click="probeSpeedGroup(sg, 'auto')" :disabled="sg.probing_auto" class="btn-ghost" style="height: 24px; width: 26px; padding: 0; justify-content: center;" title="测速探测自动组">
+                      <i data-lucide="activity" style="width: 13px; height: 13px;" :class="{ 'spin': sg.probing_auto }"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <!-- Row 2: Fallback -->
+              <tr class="region-row-fallback">
+                <td>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span class="region-strategy-badge badge-fallback">故障转移</span>
+                    <code class="font-mono region-user-pill" x-text="sg.users[1].username" @click="copySpeedUser(sg, 1)" title="点击复制认证账号（密码相同）"></code>
+                  </div>
+                </td>
+                <td>
+                  <div class="region-target-node">
+                    <span class="target-radio-dot fallback-dot">●</span>
+                    <span class="target-name font-mono" :title="sg.users[1].now || '主节点健康盯住中...'" x-text="sg.users[1].now || '主节点健康'"></span>
+                  </div>
+                </td>
+                <td>
+                  <div class="probe-squares-bar" :title="speedHistoryTooltip(sg, 'fallback')">
+                    <template x-for="(h, idx) in probeSquares(sg.probe_fb)" :key="'s-hfb-' + idx">
+                      <span class="probe-square-dot"
+                            :style="{ background: probeSquareColor(h) }"
+                            :title="probeSquareDotTitle(h)"></span>
+                    </template>
+                  </div>
+                </td>
+                <td>
+                  <template x-if="sg.probe_fb && (sg.probe_fb.speed_formatted || sg.probe_fb.latency_ms)">
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                      <template x-if="sg.probe_fb.speed_formatted">
+                        <span class="badge font-mono" style="font-weight: 700; color: #10b981; border-color: #10b981;" x-text="'⚡ ' + sg.probe_fb.speed_formatted"></span>
+                      </template>
+                      <template x-if="sg.probe_fb.latency_ms">
+                        <span class="text-dim font-mono" style="font-size: 10px;" x-text="sg.probe_fb.latency_ms + 'ms'"></span>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="!sg.probe_fb || (!sg.probe_fb.speed_formatted && !sg.probe_fb.latency_ms)">
+                    <span class="text-dim font-mono" style="font-size: 11px;" x-text="sg.probe_fb && sg.probe_fb.error ? '失败' : '未测速'"></span>
+                  </template>
+                </td>
+                <td style="text-align: right;">
+                  <div class="action-btn-group">
+                    <button @click="copyText(sg.users[1].proxy, '已复制 ' + sg.users[1].username + ' 转移代理接入串')" :title="'复制 ' + sg.users[1].username + ' 代理接入串: ' + sg.users[1].proxy" class="btn-ghost" style="height: 24px; width: 26px; padding: 0; justify-content: center;">
+                      <i data-lucide="link" style="width: 13px; height: 13px;"></i>
+                    </button>
+                    <button @click="copyText(sg.users[1].curl, '已复制 ' + sg.users[1].username + ' cURL 测试命令')" :title="'复制 cURL: ' + lg.users[1].curl" class="btn-ghost" style="height: 24px; width: 26px; padding: 0; justify-content: center;">
+                      <i data-lucide="terminal" style="width: 13px; height: 13px;"></i>
+                    </button>
+                    <button @click="probeSpeedGroup(sg, 'fallback')" :disabled="sg.probing_fb" class="btn-ghost" style="height: 24px; width: 26px; padding: 0; justify-content: center;" title="测速探测转移组">
+                      <i data-lucide="activity" style="width: 13px; height: 13px;" :class="{ 'spin': sg.probing_fb }"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </template>
+        </table>
+
+        <!-- Cards view -->
+        <div class="region-cards">
+          <template x-for="sg in filteredSpeedGroups" :key="'scard-' + sg.code">
+            <div class="region-card" style="border-top: 2px solid;" :style="{ borderTopColor: sg.color }">
+              <div class="rc-header">
+                <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%;" :style="{ background: sg.color }"></span>
+                <span class="font-mono rc-title" x-text="sg.code.toUpperCase()"></span>
+                <span class="badge" style="margin-left: 6px; font-size: 10px;" :style="{ color: sg.color }" x-text="sg.tag + ' · ' + sg.desc"></span>
+                <span class="rc-count" x-text="sg.node_count + ' 节点 · ' + sg.healthy_count + ' 活'"></span>
+              </div>
+              <div class="rc-line">
+                <span class="text-dim" style="font-size: 10px;">平均网速</span>
+                <template x-if="sg.avg_speed_formatted">
+                  <span class="badge font-mono" style="font-weight: 700;" :style="{ color: sg.color }" x-text="'⚡ ' + sg.avg_speed_formatted"></span>
+                </template>
+                <template x-if="!sg.avg_speed_formatted">
+                  <span class="text-dim" style="font-size: 10px;">-</span>
+                </template>
+              </div>
+              <div class="rc-user-row">
+                <span class="region-strategy-badge badge-auto">自动</span>
+                <code class="font-mono" x-text="sg.users[0].username" @click="copySpeedUser(sg, 0)" title="点击复制账号（密码相同）"></code>
+                <span class="rc-now" :title="sg.users[0].now || '未选中'" x-text="sg.users[0].now ? '→ ' + sg.users[0].now : '→ -'"></span>
+                <div class="probe-squares-bar" style="margin-left: auto;" :title="speedHistoryTooltip(sg, 'auto')">
+                  <template x-for="(h, idx) in probeSquares(sg.probe)" :key="'sc-h-' + idx">
+                    <span class="probe-square-dot" :style="{ background: probeSquareColor(h) }" :title="probeSquareDotTitle(h)"></span>
+                  </template>
+                </div>
+              </div>
+              <div class="rc-user-row">
+                <span class="region-strategy-badge badge-fallback">转移</span>
+                <code class="font-mono" x-text="sg.users[1].username" @click="copySpeedUser(sg, 1)" title="点击复制账号（密码相同）"></code>
+                <span class="rc-now" :title="sg.users[1].now || '未选中'" x-text="sg.users[1].now ? '→ ' + sg.users[1].now : '→ -'"></span>
+                <div class="probe-squares-bar" style="margin-left: auto;" :title="speedHistoryTooltip(sg, 'fallback')">
+                  <template x-for="(h, idx) in probeSquares(sg.probe_fb)" :key="'sc-hfb-' + idx">
+                    <span class="probe-square-dot" :style="{ background: probeSquareColor(h) }" :title="probeSquareDotTitle(h)"></span>
+                  </template>
+                </div>
+              </div>
+              <div class="rc-actions">
+                <button @click="copyText(sg.users[0].proxy, '已复制 ' + sg.users[0].username + ' 代理接入串')" :title="sg.users[0].proxy" class="btn-ghost" style="height: 22px; padding: 0 8px; font-size: 11px;"><i data-lucide="link" style="width: 11px; height: 11px; margin-right: 3px;"></i>自动</button>
+                <button @click="copyText(sg.users[1].proxy, '已复制 ' + sg.users[1].username + ' 代理接入串')" :title="sg.users[1].proxy" class="btn-ghost" style="height: 22px; padding: 0 8px; font-size: 11px;"><i data-lucide="link" style="width: 11px; height: 11px; margin-right: 3px;"></i>转移</button>
+                <button @click="copyText(sg.users[0].curl, '已复制 ' + sg.users[0].username + ' cURL 测试命令')" :title="sg.users[0].curl" class="btn-ghost" style="height: 22px; padding: 0 6px; font-size: 11px;"><i data-lucide="terminal" style="width: 11px; height: 11px; margin-right: 2px;"></i>cURL</button>
+                <button @click="probeSpeedGroup(sg, 'auto')" :disabled="sg.probing_auto" class="btn-ghost" style="height: 22px; padding: 0 8px; font-size: 11px; margin-left: auto;"><i data-lucide="activity" style="width: 11px; height: 11px; margin-right: 3px;" :class="{ 'spin': sg.probing_auto }"></i>探测</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <!-- Footer -->
@@ -3725,6 +3949,10 @@
         isLevelProbing: false,
         levelGroups: [],
         levelSearch: '',
+        speedCards: false,
+        isSpeedProbing: false,
+        speedGroups: [],
+        speedSearch: '',
         ipCurrentPage: 1,
         ipPageSize: 15,
         ipPageJumpInput: '',
@@ -3783,6 +4011,7 @@
           if (qp.get('view') === 'nodes') this.activeView = 'nodes';
           if (qp.get('view') === 'ip_groups') this.activeView = 'ip_groups';
           if (qp.get('view') === 'level_groups') this.activeView = 'level_groups';
+          if (qp.get('view') === 'speed_groups') this.activeView = 'speed_groups';
           if (qp.get('health') === '1') { this.healthModalOpen = true; }
           if (qp.get('modal') === 'sources') { this.openSourcesModal(); }
           if (qp.get('modal') === 'preview') { this.openConfigHub('preview'); }
@@ -3793,11 +4022,14 @@
           this.fetchSources();
           this.fetchSystemProxy();
           this.fetchLevelGroups();
+          this.fetchSpeedGroups();
           this.fetchHealth(true);
 
           this.$watch('subMode', () => { this.renderSubQrCode(); });
 
-          if (this.activeView === 'level_groups') {
+          if (this.activeView === 'speed_groups') {
+            this.fetchSpeedGroups();
+          } else if (this.activeView === 'level_groups') {
             this.fetchLevelGroups();
           } else if (this.activeView === 'ip_groups') {
             this.fetchIpGroups();
@@ -4346,6 +4578,15 @@
           ).join('\n');
         },
 
+        speedHistoryTooltip(sg, strategy) {
+          const probe = (strategy === 'fallback') ? (sg.probe_fb || null) : (sg.probe || null);
+          const hist = probe && probe.history ? probe.history : [];
+          if (hist.length === 0) return '尚未探测';
+          return hist.slice(-10).map(h =>
+            `${new Date(h.checked_at).toLocaleTimeString()} ${h.ok ? '✓ ' + (h.speed_formatted ? '⚡ ' + h.speed_formatted + ' ' : '') + (h.latency_ms ?? '-') + 'ms' : '✗ 失败'}`
+          ).join('\n');
+        },
+
         probeHistoryOf(node) {
           const hist = node && node.probe && node.probe.history ? node.probe.history : [];
           // show last 10, pad with nulls (grey) on the left
@@ -4867,6 +5108,107 @@
 
         copyLevelUser(lg, idx) {
           const u = lg.users[idx];
+          if (u) this.copyText(u.username, `已复制账号 ${u.username}（密码相同）`);
+        },
+
+        get filteredSpeedGroups() {
+          const q = this.speedSearch.trim().toLowerCase();
+          if (!q) return this.speedGroups;
+          return this.speedGroups.filter(g =>
+            g.code.toLowerCase().includes(q) ||
+            g.name.toLowerCase().includes(q) ||
+            g.desc.toLowerCase().includes(q) ||
+            g.tag.toLowerCase().includes(q) ||
+            (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
+          );
+        },
+
+        get speedGroupTotalNodes() {
+          return this.speedGroups.reduce((s, g) => s + g.node_count, 0);
+        },
+
+        async switchToSpeedGroups() {
+          this.activeView = 'speed_groups';
+          if (this.speedGroups.length === 0) await this.fetchSpeedGroups();
+          this.$nextTick(() => lucide.createIcons());
+        },
+
+        async fetchSpeedGroups() {
+          try {
+            const res = await fetch('/api/speed-groups');
+            if (res.ok) {
+              const json = await res.json();
+              this.speedGroups = (json.data || []).map(g => ({
+                ...g,
+                probing_auto: false,
+                probing_fb: false,
+                probe: g.probe || null,
+                probe_fb: g.probe_fb || null
+              }));
+            } else {
+              this.showToast('速度分组加载失败: ' + await res.text(), 'error');
+            }
+          } catch (e) {
+            console.error('Failed to fetch speed groups:', e);
+          }
+          this.$nextTick(() => lucide.createIcons());
+        },
+
+        async probeSpeedGroup(sg, strategy) {
+          const isFb = strategy === 'fallback';
+          if (isFb) sg.probing_fb = true; else sg.probing_auto = true;
+          try {
+            const res = await fetch(`/api/speed-groups/${encodeURIComponent(sg.code)}/probe?strategy=${strategy || 'auto'}`, { method: 'POST' });
+            if (res.ok) {
+              const json = await res.json();
+              if (isFb) sg.probe_fb = json.data; else sg.probe = json.data;
+              const p = json.data || {};
+              const spd = p.speed_formatted ? ` ⚡ ${p.speed_formatted}` : '';
+              const lat = p.latency_ms ? ` (${p.latency_ms}ms)` : '';
+              const ip = p.outbound_ip ? ` IP: ${p.outbound_ip}` : '';
+              const err = p.error ? ` 失败: ${p.error}` : '';
+              const label = isFb ? '故障转移' : '自动';
+              this.showToast(`速度梯队 [${sg.code.toUpperCase()}] ${label}探测完成${spd}${lat}${ip}${err}`, p.error ? 'error' : 'success');
+            } else {
+              this.showToast(`探测速度梯队 [${sg.code.toUpperCase()}] 失败: ` + await res.text(), 'error');
+            }
+          } catch (e) {
+            this.showToast('网络错误: ' + e.message, 'error');
+          } finally {
+            if (isFb) sg.probing_fb = false; else sg.probing_auto = false;
+            this.$nextTick(() => lucide.createIcons());
+          }
+        },
+
+        async probeAllSpeedGroups() {
+          if (this.isSpeedProbing) return;
+          this.isSpeedProbing = true;
+          this.showToast('已启动全部速度分组探测...', 'info');
+          try {
+            const res = await fetch('/api/speed-groups/probe-all', { method: 'POST' });
+            if (!res.ok) {
+              this.showToast('启动速度探测失败: ' + await res.text(), 'error');
+              this.isSpeedProbing = false;
+              return;
+            }
+            let polls = 0;
+            const timer = setInterval(async () => {
+              polls++;
+              await this.fetchSpeedGroups();
+              if (polls >= 8) {
+                clearInterval(timer);
+                this.isSpeedProbing = false;
+                this.showToast('速度分组探测完成', 'success');
+              }
+            }, 2000);
+          } catch (e) {
+            this.showToast('网络错误: ' + e.message, 'error');
+            this.isSpeedProbing = false;
+          }
+        },
+
+        copySpeedUser(sg, idx) {
+          const u = sg.users[idx];
           if (u) this.copyText(u.username, `已复制账号 ${u.username}（密码相同）`);
         },
 

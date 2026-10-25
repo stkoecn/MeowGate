@@ -192,7 +192,7 @@ pub async fn probe_all_nodes(
             });
         }
 
-        while let Some(_) = set.join_next().await {}
+        while set.join_next().await.is_some() {}
         state_clone.persist_health().await;
         let _ = state_clone.apply_and_reload().await;
         state_clone.is_probing.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -239,7 +239,7 @@ pub async fn probe_single_node(
             error: res.error.clone(),
         };
         let (h, changed) = state.health.record(&node, check_outcome).await;
-        state.persist_health_for(&[node.clone()]).await;
+        state.persist_health_for(std::slice::from_ref(&node)).await;
         if changed {
             let _ = state.apply_and_reload().await;
         }

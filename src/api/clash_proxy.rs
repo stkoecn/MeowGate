@@ -132,7 +132,7 @@ pub async fn clash_proxy_stream_handler(
                 .header("Access-Control-Allow-Headers", "*");
 
             use futures_util::TryStreamExt;
-            let stream = resp.bytes_stream().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+            let stream = resp.bytes_stream().map_err(std::io::Error::other);
             response_builder
                 .body(Body::from_stream(stream))
                 .unwrap_or_else(|_| {

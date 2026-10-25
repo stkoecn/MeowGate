@@ -318,7 +318,7 @@ pub async fn probe_all_ip_groups(
                 });
             }
         }
-        while let Some(_) = set.join_next().await {}
+        while set.join_next().await.is_some() {}
         tracing::info!("Finished probing {} IP group entries via kernel API", total);
     });
 

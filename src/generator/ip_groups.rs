@@ -118,7 +118,7 @@ pub fn build_ip_groups_filtered(
             flag,
             node_count: node_names.len(),
             healthy_count: healthy,
-            avg_latency_ms: if lat_cnt > 0 { Some(lat_sum / lat_cnt) } else { None },
+            avg_latency_ms: lat_sum.checked_div(lat_cnt),
             users,
             nodes: node_names,
         });

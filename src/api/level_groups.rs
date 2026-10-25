@@ -318,7 +318,7 @@ pub async fn probe_all_level_groups(
             }
         }
 
-        while let Some(_) = set.join_next().await {}
+        while set.join_next().await.is_some() {}
     });
 
     Ok(Json(json!({

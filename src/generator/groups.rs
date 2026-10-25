@@ -100,7 +100,7 @@ pub fn build_region_groups_filtered(
         ];
         groups.push(RegionGroup {
             flag: crate::collector::country::code_to_flag(&code),
-            avg_latency_ms: if lat_cnt > 0 { Some(lat_sum / lat_cnt) } else { None },
+            avg_latency_ms: lat_sum.checked_div(lat_cnt),
             healthy_count: healthy,
             node_count: node_names.len(),
             code,

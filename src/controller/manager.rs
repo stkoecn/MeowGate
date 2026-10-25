@@ -8,6 +8,12 @@ pub struct CoreManager {
     child: Mutex<Option<Child>>,
 }
 
+impl Default for CoreManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CoreManager {
     pub fn new() -> Self {
         Self {

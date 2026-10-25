@@ -180,8 +180,7 @@ async fn tunnel_socks5_guest(mut client: TcpStream, proxy_port: u16) -> io::Resu
     let mut up_choice = [0u8; 2];
     upstream.read_exact(&mut up_choice).await?;
     if up_choice != [0x05, 0x02] {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "Upstream kernel did not accept SOCKS5 user/password auth",
         ));
     }
@@ -200,8 +199,7 @@ async fn tunnel_socks5_guest(mut client: TcpStream, proxy_port: u16) -> io::Resu
     let mut auth_resp = [0u8; 2];
     upstream.read_exact(&mut auth_resp).await?;
     if auth_resp[1] != 0x00 {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "Upstream kernel rejected guest credentials",
         ));
     }

@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use crate::collector::{Node, User};
 use crate::controller::prober::NodeProbeResult;
 use crate::controller::traffic_tracker::NodeTrafficStats;
@@ -154,7 +156,7 @@ pub fn build_speed_groups_filtered(
             },
         ];
 
-        let avg_speed = if speed_cnt > 0 { Some(speed_sum / speed_cnt) } else { None };
+        let avg_speed = speed_sum.checked_div(speed_cnt);
 
         groups.push(SpeedGroup {
             tier,
@@ -169,7 +171,7 @@ pub fn build_speed_groups_filtered(
             healthy_count: healthy,
             avg_speed_bps: avg_speed,
             avg_speed_formatted: avg_speed.map(format_speed),
-            avg_latency_ms: if lat_cnt > 0 { Some(lat_sum / lat_cnt) } else { None },
+            avg_latency_ms: lat_sum.checked_div(lat_cnt),
             users,
             nodes: node_names,
         });

@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use crate::collector::{Node, User};
 use crate::controller::prober::NodeProbeResult;
 
@@ -116,7 +118,7 @@ pub fn build_level_groups_filtered(
             max_latency_ms: max_lat,
             node_count: node_names.len(),
             healthy_count: healthy,
-            avg_latency_ms: if lat_cnt > 0 { Some(lat_sum / lat_cnt) } else { None },
+            avg_latency_ms: lat_sum.checked_div(lat_cnt),
             users,
             nodes: node_names,
         });

@@ -310,7 +310,7 @@ pub async fn probe_all_regions(
                 });
             }
         }
-        while let Some(_) = set.join_next().await {}
+        while set.join_next().await.is_some() {}
         tracing::info!("Finished probing {} region entries via kernel API", total);
     });
 

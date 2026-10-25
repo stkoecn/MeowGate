@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments, clippy::type_complexity, clippy::needless_borrows_for_generic_args)]
+
 use crate::collector::{Node, User};
 use crate::error::Result;
 use std::collections::HashSet;
@@ -622,7 +624,7 @@ impl TemplateRenderer {
     pub fn node_user_aliases(username: &str) -> Vec<String> {
         let mut aliases = Vec::new();
         let len = username.len();
-        if len >= 10 && len <= 12 {
+        if (10..=12).contains(&len) {
             let hash_start = len - 8;
             let prefix = &username[..hash_start];
             let hash = &username[hash_start..];

@@ -206,6 +206,7 @@ impl AppState {
     /// - clash_api (RESTful :9090 or custom host/port with secret)
     /// - clash_dir (scans custom directory for .yaml/.yml profiles)
     /// - clash_file (specific .yaml configuration file)
+    ///
     /// All nodes are aggregated and deduplicated.
     pub async fn sync_nodes_and_users(&self, force_refresh_creds: bool) -> Result<usize> {
         let sources = self.db.get_all_sources().await?;
@@ -593,7 +594,7 @@ impl AppState {
                 // that doesn't already contain prev history, append it:
                 if res.history.len() == 1 && (prev.history.is_empty() || prev.history.last().map(|e| e.checked_at) != res.history.first().map(|e| e.checked_at)) {
                     let mut history = prev.history.clone();
-                    history.extend(res.history.drain(..));
+                    history.append(&mut res.history);
                     res.history = history;
                 }
                 if res.outbound_ip.is_none() {

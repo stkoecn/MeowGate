@@ -175,7 +175,7 @@ impl CountryInfer {
         for (kw, code) in KEYWORDS {
             if lower.contains(kw) {
                 let len = kw.len();
-                if best.as_ref().map_or(true, |(bl, _)| len > *bl) {
+                if best.as_ref().is_none_or(|(bl, _)| len > *bl) {
                     best = Some((len, code.to_string()));
                 }
             }
@@ -275,7 +275,7 @@ fn is_ri(c: char) -> bool {
 pub fn code_to_flag(code: &str) -> String {
     let mut s = String::new();
     for b in code.to_uppercase().chars() {
-        if ('A'..='Z').contains(&b) {
+        if b.is_ascii_uppercase() {
             s.push(char::from_u32(0x1F1E6 + (b as u32 - 'A' as u32)).unwrap_or(' '));
         }
     }

@@ -3749,6 +3749,7 @@
           </div>
         </div>
 
+
         <!-- URL Input & QR Code Side-by-Side Area -->
         <div style="display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap;">
           <!-- Left Column: URL & Quick Actions -->
@@ -3929,6 +3930,7 @@
         showAddSource: false,
         subModalOpen: false,
         subMode: 'healthy',
+        subToken: localStorage.getItem('meow_token') || '',
         editSourceModalOpen: false,
         sysProxy: {
           supported: true,
@@ -5460,8 +5462,11 @@
           this.openConfigHub('preview');
         },
 
-        openSubModal() {
+        async openSubModal() {
           this.subModalOpen = true;
+          if (this.authEnabled && !this.subToken) {
+            await this.fetchAuthStatus();
+          }
           this.$nextTick(() => {
             window.refreshIcons();
             this.renderSubQrCode();
@@ -5511,9 +5516,9 @@
           } else {
             params.push('filter=healthy');
           }
-          const token = localStorage.getItem('meow_token');
-          if (this.authEnabled && token) {
-            params.push('token=' + encodeURIComponent(token));
+          const t = (this.subToken || localStorage.getItem('meow_token') || '').trim();
+          if (t) {
+            params.push('token=' + encodeURIComponent(t));
           }
           return base + '?' + params.join('&');
         },
@@ -5971,7 +5976,11 @@
             const res = await fetch('/api/auth/status');
             if (res.ok) {
               const json = await res.json();
-              this.authEnabled = !!(json.data && json.data.auth_enabled);
+              this.authEnabled = !!(json.auth_enabled ?? (json.data && json.data.auth_enabled));
+              if (json.sub_token) {
+                this.subToken = json.sub_token;
+                localStorage.setItem('meow_token', json.sub_token);
+              }
             }
           } catch (e) {
             console.warn('Failed to fetch auth status:', e);

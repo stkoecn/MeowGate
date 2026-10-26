@@ -111,6 +111,12 @@ pub fn build_region_groups_filtered(
     groups
 }
 
+pub fn region_country_name(code: &str) -> String {
+    let flag = crate::collector::country::code_to_flag(code);
+    let cname = crate::collector::country::country_name(code);
+    format!("{} {}", flag, cname)
+}
+
 pub fn region_group_name(code: &str, fallback: bool) -> String {
     let flag = crate::collector::country::code_to_flag(code);
     let cname = crate::collector::country::country_name(code);

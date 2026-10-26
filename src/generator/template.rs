@@ -222,6 +222,10 @@ impl TemplateRenderer {
         writeln!(out, "  - name: {}", Self::format_yaml_str(&main_selector_name)).unwrap();
         writeln!(out, "    type: select").unwrap();
         writeln!(out, "    proxies:").unwrap();
+        writeln!(out, "      - ⚡ 自动选择").unwrap();
+        writeln!(out, "      - 📶 延时分级").unwrap();
+        writeln!(out, "      - ⚡ 速度梯队").unwrap();
+        writeln!(out, "      - 🌍 地区选择").unwrap();
         // Place fast speed group and lv1 as top choices in 🚀 节点选择
         if speed_groups.iter().any(|sg| sg.code == "fast" && !sg.nodes.is_empty()) {
             let fast_name = crate::generator::speed_groups::speed_group_name("fast", false);
@@ -231,32 +235,83 @@ impl TemplateRenderer {
             let lv1_name = crate::generator::level_groups::level_group_name("lv1", false);
             writeln!(out, "      - {}", Self::format_yaml_str(&lv1_name)).unwrap();
         }
-        writeln!(out, "      - ⚡ 自动选择").unwrap();
         writeln!(out, "      - DIRECT").unwrap();
-        // Include Speed groups at top of 🚀 节点选择
-        for sg in speed_groups {
-            if !sg.nodes.is_empty() && sg.code != "fast" {
-                let auto_name = crate::generator::speed_groups::speed_group_name(&sg.code, false);
-                writeln!(out, "      - {}", Self::format_yaml_str(&auto_name)).unwrap();
+        // Include non-empty country selectors in 🚀 节点选择
+        for rg in region_groups {
+            if !rg.nodes.is_empty() {
+                let country_name = crate::generator::groups::region_country_name(&rg.code);
+                writeln!(out, "      - {}", Self::format_yaml_str(&country_name)).unwrap();
             }
         }
-        // Include remaining Level groups at top of 🚀 节点选择
+        for node in &routable {
+            writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
+        }
+
+        // 1. 📶 延时分级大组
+        writeln!(out, "  - name: 📶 延时分级").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_level_proxy = false;
         for lg in level_groups {
-            if !lg.nodes.is_empty() && lg.code != "lv1" {
+            if !lg.nodes.is_empty() {
+                has_level_proxy = true;
                 let auto_name = crate::generator::level_groups::level_group_name(&lg.code, false);
                 writeln!(out, "      - {}", Self::format_yaml_str(&auto_name)).unwrap();
             }
         }
-        // Include Region groups at top of 🚀 节点选择
-        for rg in region_groups {
-            if !rg.nodes.is_empty() {
-                let auto_name = crate::generator::groups::region_group_name(&rg.code, false);
+        if !has_level_proxy {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 2. ⚡ 速度梯队大组
+        writeln!(out, "  - name: ⚡ 速度梯队").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_speed_proxy = false;
+        for sg in speed_groups {
+            if !sg.nodes.is_empty() {
+                has_speed_proxy = true;
+                let auto_name = crate::generator::speed_groups::speed_group_name(&sg.code, false);
                 writeln!(out, "      - {}", Self::format_yaml_str(&auto_name)).unwrap();
             }
         }
-        writeln!(out, "      - DIRECT").unwrap();
-        for node in &routable {
-            writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
+        if !has_speed_proxy {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 3. 🌍 地区选择大组
+        writeln!(out, "  - name: 🌍 地区选择").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_region_proxy = false;
+        for rg in region_groups {
+            if !rg.nodes.is_empty() {
+                has_region_proxy = true;
+                let country_name = crate::generator::groups::region_country_name(&rg.code);
+                writeln!(out, "      - {}", Self::format_yaml_str(&country_name)).unwrap();
+            }
+        }
+        if !has_region_proxy {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 4. 各国家/地区独立选择组 (e.g. 🇭🇰 香港, 🇯🇵 日本)
+        for rg in region_groups {
+            if rg.nodes.is_empty() {
+                continue;
+            }
+            let country_name = crate::generator::groups::region_country_name(&rg.code);
+            let auto_name = crate::generator::groups::region_group_name(&rg.code, false);
+            let fb_name = crate::generator::groups::region_group_name(&rg.code, true);
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&country_name)).unwrap();
+            writeln!(out, "    type: select").unwrap();
+            writeln!(out, "    proxies:").unwrap();
+            writeln!(out, "      - {}", Self::format_yaml_str(&auto_name)).unwrap();
+            writeln!(out, "      - {}", Self::format_yaml_str(&fb_name)).unwrap();
+            for n in &rg.nodes {
+                writeln!(out, "      - {}", Self::format_yaml_str(n)).unwrap();
+            }
         }
 
         // Group "⚡ 自动选择": url-test containing all healthy nodes
@@ -729,6 +784,10 @@ impl TemplateRenderer {
         writeln!(out, "  - name: {}", Self::format_yaml_str(&main_selector_name)).unwrap();
         writeln!(out, "    type: select").unwrap();
         writeln!(out, "    proxies:").unwrap();
+        writeln!(out, "      - ⚡ 自动选择").unwrap();
+        writeln!(out, "      - 📶 延时分级").unwrap();
+        writeln!(out, "      - ⚡ 速度梯队").unwrap();
+        writeln!(out, "      - 🌍 地区选择").unwrap();
         // Place fast speed group and lv1 as top choices in 🚀 节点选择
         if speed_groups.iter().any(|sg| sg.code == "fast" && !sg.nodes.is_empty()) {
             let fast_name = crate::generator::speed_groups::speed_group_name("fast", false);
@@ -738,28 +797,83 @@ impl TemplateRenderer {
             let lv1_name = crate::generator::level_groups::level_group_name("lv1", false);
             writeln!(out, "      - {}", Self::format_yaml_str(&lv1_name)).unwrap();
         }
-        writeln!(out, "      - ⚡ 自动选择").unwrap();
-        for sg in speed_groups {
-            if !sg.nodes.is_empty() && sg.code != "fast" {
-                let auto_name = crate::generator::speed_groups::speed_group_name(&sg.code, false);
-                writeln!(out, "      - {}", Self::format_yaml_str(&auto_name)).unwrap();
+        writeln!(out, "      - DIRECT").unwrap();
+        // Include non-empty country selectors in 🚀 节点选择
+        for rg in region_groups {
+            if !rg.nodes.is_empty() {
+                let country_name = crate::generator::groups::region_country_name(&rg.code);
+                writeln!(out, "      - {}", Self::format_yaml_str(&country_name)).unwrap();
             }
         }
+        for node in &routable {
+            writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
+        }
+
+        // 1. 📶 延时分级大组
+        writeln!(out, "  - name: 📶 延时分级").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_level_proxy = false;
         for lg in level_groups {
-            if !lg.nodes.is_empty() && lg.code != "lv1" {
+            if !lg.nodes.is_empty() {
+                has_level_proxy = true;
                 let auto_name = crate::generator::level_groups::level_group_name(&lg.code, false);
                 writeln!(out, "      - {}", Self::format_yaml_str(&auto_name)).unwrap();
             }
         }
-        for rg in region_groups {
-            if !rg.nodes.is_empty() {
-                let auto_name = crate::generator::groups::region_group_name(&rg.code, false);
+        if !has_level_proxy {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 2. ⚡ 速度梯队大组
+        writeln!(out, "  - name: ⚡ 速度梯队").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_speed_proxy = false;
+        for sg in speed_groups {
+            if !sg.nodes.is_empty() {
+                has_speed_proxy = true;
+                let auto_name = crate::generator::speed_groups::speed_group_name(&sg.code, false);
                 writeln!(out, "      - {}", Self::format_yaml_str(&auto_name)).unwrap();
             }
         }
-        writeln!(out, "      - DIRECT").unwrap();
-        for node in &routable {
-            writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
+        if !has_speed_proxy {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 3. 🌍 地区选择大组
+        writeln!(out, "  - name: 🌍 地区选择").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_region_proxy = false;
+        for rg in region_groups {
+            if !rg.nodes.is_empty() {
+                has_region_proxy = true;
+                let country_name = crate::generator::groups::region_country_name(&rg.code);
+                writeln!(out, "      - {}", Self::format_yaml_str(&country_name)).unwrap();
+            }
+        }
+        if !has_region_proxy {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 4. 各国家/地区独立选择组 (e.g. 🇭🇰 香港, 🇯🇵 日本)
+        for rg in region_groups {
+            if rg.nodes.is_empty() {
+                continue;
+            }
+            let country_name = crate::generator::groups::region_country_name(&rg.code);
+            let auto_name = crate::generator::groups::region_group_name(&rg.code, false);
+            let fb_name = crate::generator::groups::region_group_name(&rg.code, true);
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&country_name)).unwrap();
+            writeln!(out, "    type: select").unwrap();
+            writeln!(out, "    proxies:").unwrap();
+            writeln!(out, "      - {}", Self::format_yaml_str(&auto_name)).unwrap();
+            writeln!(out, "      - {}", Self::format_yaml_str(&fb_name)).unwrap();
+            for n in &rg.nodes {
+                writeln!(out, "      - {}", Self::format_yaml_str(n)).unwrap();
+            }
         }
 
         // 4b. ⚡ 自动选择 url-test group

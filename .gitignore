@@ -1,6 +1,12 @@
 # Rust build artifacts
 target/
 
+# Binaries and local core copies
+bin/*.exe
+bin/meow-core*
+bin/mihomo*
+bin/clash*
+
 # Databases and runtime generated configs
 *.db
 *.db-shm

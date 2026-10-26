@@ -21,10 +21,21 @@ impl CoreManager {
         }
     }
 
-    /// Finds an available Clash/Mihomo core binary on the machine:
-    /// - Linux/Debian: /usr/local/bin/mihomo, /usr/bin/mihomo, bin/mihomo, PATH
-    /// - Windows: Clash Verge directory, bin/mihomo.exe, PATH
+    /// Finds an available Clash/Mihomo core binary on the machine.
+    ///
+    /// Prioritizes private isolated binaries in `bin/` (e.g. `bin/meow-core.exe` or `bin/mihomo`)
+    /// so MeowGate does NOT run Clash Verge's own `verge-mihomo.exe` directly, avoiding
+    /// process ownership and file lock conflicts ("核心进程冲突") with Clash Verge Rev.
     pub fn find_core_binary() -> Option<PathBuf> {
+        #[cfg(target_os = "windows")]
+        let primary_isolated = PathBuf::from(r"bin\meow-core.exe");
+        #[cfg(not(target_os = "windows"))]
+        let primary_isolated = PathBuf::from("bin/meow-core");
+
+        if primary_isolated.exists() && primary_isolated.is_file() {
+            return Some(primary_isolated);
+        }
+
         #[allow(unused_mut)]
         let mut candidates = vec![
             PathBuf::from("bin/mihomo"),
@@ -39,16 +50,37 @@ impl CoreManager {
 
         #[cfg(target_os = "windows")]
         {
-            candidates.push(PathBuf::from(r"D:\Clash Verge\verge-mihomo.exe"));
-            candidates.push(PathBuf::from(r"C:\Program Files\Clash Verge\verge-mihomo.exe"));
-            candidates.push(PathBuf::from(r"bin\verge-mihomo.exe"));
-            candidates.push(PathBuf::from(r"bin\mihomo.exe"));
-            candidates.push(PathBuf::from(r"bin\clash.exe"));
+            candidates.insert(0, PathBuf::from(r"bin\mihomo.exe"));
+            candidates.insert(1, PathBuf::from(r"bin\clash.exe"));
+            candidates.insert(2, PathBuf::from(r"bin\verge-mihomo.exe"));
         }
 
-        for c in candidates {
+        for c in &candidates {
             if c.exists() && c.is_file() {
-                return Some(c);
+                return Some(c.clone());
+            }
+        }
+
+        // On Windows, if no isolated binary exists yet, check if Clash Verge is installed.
+        // If found, copy it to `bin/meow-core.exe` to isolate the process name and executable path,
+        // completely preventing "核心进程冲突" with Clash Verge Rev.
+        #[cfg(target_os = "windows")]
+        {
+            let verge_candidates = [
+                PathBuf::from(r"D:\Clash Verge\verge-mihomo.exe"),
+                PathBuf::from(r"C:\Program Files\Clash Verge\verge-mihomo.exe"),
+            ];
+
+            for vc in verge_candidates {
+                if vc.exists() && vc.is_file() {
+                    let dest = PathBuf::from(r"bin\meow-core.exe");
+                    let _ = std::fs::create_dir_all("bin");
+                    if std::fs::copy(&vc, &dest).is_ok() {
+                        info!("Copied isolated core {:?} -> {:?} to prevent process conflict with Clash Verge", vc, dest);
+                        return Some(dest);
+                    }
+                    return Some(vc);
+                }
             }
         }
 

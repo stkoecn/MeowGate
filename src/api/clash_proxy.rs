@@ -14,6 +14,20 @@ pub async fn clash_proxy_handler(
     State(state): State<SharedState>,
     req: Request<Body>,
 ) -> Response<Body> {
+    if state.is_auth_enabled() {
+        let query_token = req.uri().query().and_then(|q| {
+            q.split('&').find_map(|pair| pair.strip_prefix("token="))
+        });
+        if !crate::api::auth::extract_and_verify(&state, req.headers(), query_token) {
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Body::from(r#"{"error":"Unauthorized: valid token or bearer secret required"}"#))
+                .unwrap();
+        }
+    }
+
     let kernel_api = &state.config.meow.api_url;
     let path_and_query = req
         .uri()
@@ -97,6 +111,20 @@ pub async fn clash_proxy_stream_handler(
     State(state): State<SharedState>,
     req: Request<Body>,
 ) -> Response<Body> {
+    if state.is_auth_enabled() {
+        let query_token = req.uri().query().and_then(|q| {
+            q.split('&').find_map(|pair| pair.strip_prefix("token="))
+        });
+        if !crate::api::auth::extract_and_verify(&state, req.headers(), query_token) {
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header("Content-Type", "application/json")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Body::from(r#"{"error":"Unauthorized: valid token or bearer secret required"}"#))
+                .unwrap();
+        }
+    }
+
     let kernel_api = &state.config.meow.api_url;
     let path_and_query = req
         .uri()

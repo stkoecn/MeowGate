@@ -48,6 +48,16 @@ mixed_port = 9567
 # 默认兜底策略组或节点（若节点列表为空）
 default_target = "DIRECT"
 
+[auth]
+# 官网/公网部署安全访问密码认证（未配置或留空时为免密公开模式）
+# 填入密码后，任何未带认证的网页请求将自动 302 重定向到 /login 登录页面，仅需输入该密码即可进入
+# 也可以通过环境变量 MEOWGATE_ADMIN_PASSWORD 设置
+admin_password = ""
+# 登录 Token 有效期（小时，默认 720 即 30 天）
+session_expire_hours = 720
+# JWT 签名私钥（留空时服务启动自动随机生成高强度密钥）
+jwt_secret = ""
+
 # 自动定时同步 Clash 节点并刷新 meow 配置（秒，0 表示仅手动同步）
 auto_refresh_secs = 0
 

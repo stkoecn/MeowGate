@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod config;
 pub mod health;
 pub mod ip_groups;

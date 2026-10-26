@@ -38,6 +38,23 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub health: HealthPolicy,
+
+    #[serde(default)]
+    pub auth: AuthConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AuthConfig {
+    /// Web management console & API access password.
+    /// If empty, authentication is disabled (local/LAN mode).
+    /// If set, all Web UI and API requests must be authenticated.
+    #[serde(default)]
+    pub admin_password: String,
+
+    /// JWT / HMAC secret for signing authentication session tokens.
+    /// If empty, a secure random key is generated on boot.
+    #[serde(default)]
+    pub jwt_secret: String,
 }
 
 /// Active node health-checking / lifecycle policy (see controller::health_monitor).
@@ -227,6 +244,7 @@ impl Default for AppConfig {
             ],
             auto_refresh_secs: 0,
             health: HealthPolicy::default(),
+            auth: AuthConfig::default(),
         }
     }
 }
@@ -234,19 +252,21 @@ impl Default for AppConfig {
 impl AppConfig {
     pub fn load_or_default(path: Option<&str>) -> Self {
         let config_file = path.unwrap_or("config.toml");
-        if std::path::Path::new(config_file).exists() {
+        let mut cfg = if std::path::Path::new(config_file).exists() {
             match std::fs::read_to_string(config_file) {
                 Ok(content) => match toml::from_str(&content) {
-                    Ok(cfg) => {
+                    Ok(c) => {
                         tracing::info!("Loaded configuration from {}", config_file);
-                        return cfg;
+                        c
                     }
                     Err(e) => {
                         tracing::warn!("Failed to parse {}: {}, using defaults", config_file, e);
+                        AppConfig::default()
                     }
                 },
                 Err(e) => {
                     tracing::warn!("Failed to read {}: {}, using defaults", config_file, e);
+                    AppConfig::default()
                 }
             }
         } else {
@@ -255,7 +275,16 @@ impl AppConfig {
             if let Ok(toml_str) = toml::to_string_pretty(&default_cfg) {
                 let _ = std::fs::write(config_file, toml_str);
             }
+            default_cfg
+        };
+
+        // Override admin password from environment variable if present
+        if let Ok(env_pass) = std::env::var("MEOWGATE_ADMIN_PASSWORD") {
+            if !env_pass.trim().is_empty() {
+                cfg.auth.admin_password = env_pass.trim().to_string();
+            }
         }
-        AppConfig::default()
+
+        cfg
     }
 }

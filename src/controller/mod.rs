@@ -1,3 +1,4 @@
+pub mod auth_token;
 pub mod health_monitor;
 pub mod health;
 pub mod manager;

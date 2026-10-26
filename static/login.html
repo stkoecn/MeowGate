@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="slate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录验证 - MeowGate 控制台</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%200%22%20100%22%20100%22><text y=%22.9em%22 font-size=%2290%22>🐱</text></svg>">
+  <script src="/lucide.min.js"></script>
+  <style>
+    /* Design Tokens */
+    :root, [data-theme="slate"] {
+      color-scheme: dark;
+      --bg: #0b0f17;
+      --bg-panel: #111827;
+      --bg-hover: #1f2937;
+      --bg-selected: #374151;
+      --border: #1f2937;
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --accent-contrast: #0b0f17;
+      --color-danger: #f87171;
+      --color-success: #34d399;
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #ffffff;
+      --bg-panel: #f5f5f5;
+      --bg-hover: #eeeeee;
+      --bg-selected: #e8e8e8;
+      --border: #e0e0e0;
+      --text: #1a1a1a;
+      --text-muted: #515c6b;
+      --text-dim: #5e6673;
+      --accent: #245bce;
+      --accent-hover: #1a449b;
+      --accent-contrast: #ffffff;
+      --color-danger: #d9383a;
+      --color-success: #13864a;
+    }
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #141414;
+      --bg-panel: #1f1f1f;
+      --bg-hover: #292929;
+      --bg-selected: #333333;
+      --border: #2e2e2e;
+      --text: #e0e0e0;
+      --text-muted: #888888;
+      --text-dim: #666666;
+      --accent: #d97706;
+      --accent-hover: #b45309;
+      --accent-contrast: #ffffff;
+      --color-danger: #f87171;
+      --color-success: #34d399;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .font-mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "JetBrains Mono", monospace;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px 28px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+      animation: fadeIn 0.3s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .logo-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .logo-badge {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      font-weight: 600;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .input-field {
+      width: 100%;
+      height: 38px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0 38px 0 12px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .input-field:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    }
+    .toggle-pwd-btn {
+      position: absolute;
+      right: 8px;
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px;
+      border-radius: 4px;
+    }
+    .toggle-pwd-btn:hover {
+      color: var(--text);
+    }
+    .submit-btn {
+      width: 100%;
+      height: 38px;
+      background: var(--accent);
+      color: var(--accent-contrast);
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: opacity 0.15s, transform 0.05s;
+    }
+    .submit-btn:hover {
+      opacity: 0.9;
+    }
+    .submit-btn:active {
+      transform: scale(0.99);
+    }
+    .submit-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .error-msg {
+      margin-top: 14px;
+      padding: 8px 12px;
+      background: rgba(248, 113, 113, 0.12);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      border-radius: 6px;
+      color: var(--color-danger);
+      font-size: 12px;
+      display: none;
+      align-items: center;
+      gap: 6px;
+    }
+    .spin {
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      100% { transform: rotate(360deg); }
+    }
+    .footer-text {
+      margin-top: 24px;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-card">
+    <div class="logo-container">
+      <span style="font-size: 26px;">🐱</span>
+      <span class="font-mono" style="font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">MeowGate</span>
+      <span class="logo-badge font-mono">v0.1.0</span>
+    </div>
+
+    <div style="text-align: center; margin-bottom: 24px;">
+      <h1 style="font-size: 15px; font-weight: 600; color: var(--text);">控制台访问验证</h1>
+      <p style="font-size: 12px; color: var(--text-dim); margin-top: 4px;">服务已配置公网安全防护，请输入访问密码</p>
+    </div>
+
+    <form id="loginForm" onsubmit="handleLogin(event)">
+      <div class="form-group">
+        <label class="form-label" for="passwordInput">访问密码</label>
+        <div class="input-wrapper">
+          <input 
+            type="password" 
+            id="passwordInput" 
+            class="input-field font-mono" 
+            placeholder="请输入管理员密码..." 
+            autocomplete="current-password"
+            required 
+            autofocus>
+          <button type="button" class="toggle-pwd-btn" onclick="togglePasswordVisibility()" title="显示/隐藏密码">
+            <i id="eyeIcon" data-lucide="eye" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" id="submitBtn" class="submit-btn">
+        <i data-lucide="log-in" style="width: 15px; height: 15px;"></i>
+        <span>确认进入控制台</span>
+      </button>
+
+      <div id="errorAlert" class="error-msg">
+        <i data-lucide="alert-circle" style="width: 14px; height: 14px; flex-shrink: 0;"></i>
+        <span id="errorText">密码错误，请重新输入</span>
+      </div>
+    </form>
+  </div>
+
+  <div class="footer-text">
+    <span>MeowGate · Clash 节点多租户路由网关系统</span>
+  </div>
+
+  <script>
+    // Apply saved theme
+    const savedTheme = localStorage.getItem('pi-theme');
+    if (savedTheme) {
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }
+
+    if (window.lucide) {
+      lucide.createIcons();
+    }
+
+    function togglePasswordVisibility() {
+      const input = document.getElementById('passwordInput');
+      const icon = document.getElementById('eyeIcon');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.setAttribute('data-lucide', 'eye-off');
+      } else {
+        input.type = 'password';
+        icon.setAttribute('data-lucide', 'eye');
+      }
+      lucide.createIcons();
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const input = document.getElementById('passwordInput');
+      const btn = document.getElementById('submitBtn');
+      const errBox = document.getElementById('errorAlert');
+      const errText = document.getElementById('errorText');
+      const pwd = input.value.trim();
+
+      if (!pwd) return;
+
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader" class="spin" style="width: 15px; height: 15px;"></i><span>正在验证...</span>';
+      lucide.createIcons();
+      errBox.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          // Save token to localStorage for subsequent API requests
+          if (data.token) {
+            localStorage.setItem('meow_token', data.token);
+          }
+          // Redirect to main console
+          window.location.href = '/';
+        } else {
+          errText.textContent = data.message || '访问密码错误，请重新输入';
+          errBox.style.display = 'flex';
+          input.select();
+          lucide.createIcons();
+        }
+      } catch (err) {
+        errText.textContent = '网络请求失败，请检查服务状态';
+        errBox.style.display = 'flex';
+        lucide.createIcons();
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="log-in" style="width: 15px; height: 15px;"></i><span>确认进入控制台</span>';
+        lucide.createIcons();
+      }
+    }
+  </script>
+</body>
+</html>

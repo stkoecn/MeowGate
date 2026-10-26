@@ -1421,6 +1421,18 @@
           <option value="light">Light</option>
         </select>
       </div>
+
+      <!-- Logout Button (Shown when auth is enabled) -->
+      <template x-if="authEnabled">
+        <button 
+          @click="logout()" 
+          class="btn-ghost" 
+          title="退出控制台并清除认证凭证"
+          style="height: 26px; padding: 0 8px; font-size: 11px; color: var(--color-danger); border-color: rgba(248, 113, 113, 0.3);">
+          <i data-lucide="log-out" style="width: 13px; height: 13px;"></i>
+          <span class="btn-label">退出</span>
+        </button>
+      </template>
     </div>
   </header>
 
@@ -3857,6 +3869,37 @@
 
   <!-- Alpine.js Application Logic -->
   <script>
+    // Global fetch interceptor: automatically attaches Bearer token & redirects to /login on 401
+    (function() {
+      const _origFetch = window.fetch;
+      window.fetch = async function(url, options = {}) {
+        const token = localStorage.getItem('meow_token');
+        if (token && typeof url === 'string') {
+          if (!options.headers) {
+            options.headers = { 'Authorization': 'Bearer ' + token };
+          } else if (options.headers instanceof Headers) {
+            if (!options.headers.has('Authorization')) {
+              options.headers.set('Authorization', 'Bearer ' + token);
+            }
+          } else if (Array.isArray(options.headers)) {
+            if (!options.headers.some(h => h[0].toLowerCase() === 'authorization')) {
+              options.headers.push(['Authorization', 'Bearer ' + token]);
+            }
+          } else {
+            if (!options.headers['Authorization'] && !options.headers['authorization']) {
+              options.headers['Authorization'] = 'Bearer ' + token;
+            }
+          }
+        }
+        const res = await _origFetch(url, options);
+        if (res.status === 401 && typeof url === 'string' && !url.includes('/api/auth/')) {
+          localStorage.removeItem('meow_token');
+          window.location.href = '/login';
+        }
+        return res;
+      };
+    })();
+
     // Frame-coalesced Lucide icon updater to prevent layout thrashing
     (function() {
       const _orig = window.lucide && window.lucide.createIcons;
@@ -3877,6 +3920,7 @@
       return {
         // Theme management: defaults to 'slate'
         currentTheme: localStorage.getItem('pi-theme') || 'slate',
+        authEnabled: false,
         modalOpen: false,
         importModalOpen: false,
         sourcesModalOpen: false,
@@ -4005,6 +4049,7 @@
 
         init() {
           this.applyTheme(this.currentTheme);
+          this.fetchAuthStatus();
           // Allow deep-linking: ?regions=cards / ?view=nodes / ?view=ip_groups
           const qp = new URLSearchParams(location.search);
           if (qp.get('regions') === 'cards') this.regionCards = true;
@@ -5457,13 +5502,20 @@
         get subUrl() {
           const loc = window.location;
           const origin = (loc && loc.origin) ? loc.origin : (loc && loc.protocol && loc.host ? (loc.protocol + '//' + loc.host) : 'http://127.0.0.1:9565');
+          let base = origin + '/sub';
+          const params = [];
           if (this.subMode === 'gateway') {
-            return origin + '/sub?mode=gateway';
+            params.push('mode=gateway');
           } else if (this.subMode === 'all') {
-            return origin + '/sub?filter=all';
+            params.push('filter=all');
           } else {
-            return origin + '/sub?filter=healthy';
+            params.push('filter=healthy');
           }
+          const token = localStorage.getItem('meow_token');
+          if (this.authEnabled && token) {
+            params.push('token=' + encodeURIComponent(token));
+          }
+          return base + '?' + params.join('&');
         },
 
         highlightYaml(code) {
@@ -5912,6 +5964,26 @@
             this.loading.systemProxy = false;
             this.$nextTick(() => lucide.createIcons());
           }
+        },
+
+        async fetchAuthStatus() {
+          try {
+            const res = await fetch('/api/auth/status');
+            if (res.ok) {
+              const json = await res.json();
+              this.authEnabled = !!(json.data && json.data.auth_enabled);
+            }
+          } catch (e) {
+            console.warn('Failed to fetch auth status:', e);
+          }
+        },
+
+        async logout() {
+          try {
+            await fetch('/api/auth/logout', { method: 'POST' });
+          } catch (_) {}
+          localStorage.removeItem('meow_token');
+          window.location.href = '/login';
         },
 
         async createSource() {

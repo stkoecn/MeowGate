@@ -11,6 +11,7 @@ pub struct SubQuery {
     pub mode: Option<String>,
     pub filter: Option<String>,
     pub healthy_only: Option<bool>,
+    pub token: Option<String>,
 }
 
 /// Handler for Clash subscription URLs (/sub, /clash, /api/sub).
@@ -24,8 +25,20 @@ pub struct SubQuery {
 /// - `?mode=gateway` / `?mode=raw`: raw gateway configuration including IN-USER rules.
 pub async fn clash_subscription_handler(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Query(query): Query<SubQuery>,
 ) -> impl IntoResponse {
+    if state.is_auth_enabled() {
+        let authenticated = crate::api::auth::extract_and_verify(&state, &headers, query.token.as_deref());
+        if !authenticated {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Unauthorized: valid subscription token or authentication required\n",
+            )
+                .into_response();
+        }
+    }
+
     let mode = query.mode.as_deref().unwrap_or("clash");
 
     let is_gateway = mode == "gateway" || mode == "raw";

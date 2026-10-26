@@ -37,6 +37,8 @@ pub struct AppState {
     pub status_refreshing: std::sync::atomic::AtomicBool,
     /// Guards against stacking background node probe sweeps.
     pub is_probing: std::sync::atomic::AtomicBool,
+    /// JWT / HMAC session auth manager for Web UI & API authentication.
+    pub auth_mgr: Arc<crate::controller::auth_token::AuthManager>,
 }
 
 /// Cached `/api/status` profile scan: when it ran + what it found.
@@ -64,6 +66,8 @@ impl AppState {
             config.meow.api_secret.clone(),
         );
 
+        let auth_mgr = Arc::new(crate::controller::auth_token::AuthManager::new(&config.auth.jwt_secret));
+
         let state = Arc::new(Self {
             config,
             db,
@@ -80,6 +84,7 @@ impl AppState {
             profiles_cache: Mutex::new(None),
             status_refreshing: std::sync::atomic::AtomicBool::new(false),
             is_probing: std::sync::atomic::AtomicBool::new(false),
+            auth_mgr,
         });
 
         // Initialize default sources if database is empty
@@ -877,6 +882,36 @@ impl AppState {
             }
             Err(e) => tracing::warn!("Failed to load persisted traffic stats: {}", e),
         }
+    }
+
+    /// Whether administrative authentication is enabled.
+    pub fn is_auth_enabled(&self) -> bool {
+        !self.config.auth.admin_password.trim().is_empty()
+    }
+
+    /// Checks if the provided password matches the admin password.
+    pub fn verify_password(&self, pass: &str) -> bool {
+        if !self.is_auth_enabled() {
+            return true;
+        }
+        self.config.auth.admin_password == pass
+    }
+
+    /// Verifies if a token, secret, or password is valid.
+    pub fn verify_token_or_secret(&self, token_or_pass: &str) -> bool {
+        if !self.is_auth_enabled() {
+            return true;
+        }
+        let token_or_pass = token_or_pass.trim();
+        if token_or_pass.is_empty() {
+            return false;
+        }
+        // 1. Exact admin password match
+        if self.config.auth.admin_password == token_or_pass {
+            return true;
+        }
+        // 2. Cryptographic token match
+        self.auth_mgr.verify_token(token_or_pass)
     }
 }
 

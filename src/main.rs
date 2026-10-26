@@ -161,7 +161,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/config/reload", post(api::config::reload_config))
         .route("/sub", get(api::subscription::clash_subscription_handler))
         .route("/system-proxy", get(api::sysproxy::get_proxy_status))
-        .route("/system-proxy/toggle", post(api::sysproxy::toggle_proxy));
+        .route("/system-proxy/toggle", post(api::sysproxy::toggle_proxy))
+        .route("/auth/status", get(api::auth::auth_status))
+        .route("/auth/login", post(api::auth::login))
+        .route("/auth/logout", post(api::auth::logout))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), api::auth::auth_middleware));
 
     let app = Router::new()
         .nest("/api", api_router)

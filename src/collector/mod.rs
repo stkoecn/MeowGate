@@ -19,10 +19,44 @@ pub struct Node {
 }
 
 impl Node {
-    /// Dedup key: same server + port + type counts as the same physical node,
-    /// regardless of how it is named in different subscription files.
+    /// Extracts the credential/identity indicator of a node (e.g. UUID, password, username, or token).
+    /// Used to distinguish multi-user nodes operating on the same physical server and port.
+    pub fn credential_id(&self) -> Option<String> {
+        // 1. Check direct common credential fields in extra
+        for key in &[
+            "uuid", "password", "username", "user", "auth", "auth-str", "auth_str",
+            "token", "psk", "secret", "private-key", "private_key", "public-key", "public_key",
+        ] {
+            if let Some(val) = self.extra.get(*key) {
+                if let Some(s) = val.as_str() {
+                    let s_trimmed = s.trim();
+                    if !s_trimmed.is_empty() {
+                        return Some(s_trimmed.to_string());
+                    }
+                }
+            }
+        }
+        // 2. Check user/pass combination if both present (e.g. socks5 / http)
+        let user = self.extra.get("user").and_then(|v| v.as_str()).map(|s| s.trim()).unwrap_or("");
+        let pass = self.extra.get("pass").and_then(|v| v.as_str()).map(|s| s.trim()).unwrap_or("");
+        if !user.is_empty() || !pass.is_empty() {
+            return Some(format!("{}:{}", user, pass));
+        }
+        None
+    }
+
+    /// Dedup key: combines server + port + proxy_type + optional credential_id.
+    ///
+    /// If two nodes share the same physical server and port, but belong to different
+    /// users (different UUID / password / token), they will have different dedup keys
+    /// and will both be retained for distinct user routing.
     pub fn dedup_key(&self) -> String {
-        format!("{}:{}:{}", self.server.to_ascii_lowercase(), self.port, self.proxy_type.to_ascii_lowercase())
+        let base = format!("{}:{}:{}", self.server.to_ascii_lowercase(), self.port, self.proxy_type.to_ascii_lowercase());
+        if let Some(cred) = self.credential_id() {
+            format!("{}:{}", base, cred)
+        } else {
+            base
+        }
     }
 }
 

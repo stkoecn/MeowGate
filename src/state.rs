@@ -222,6 +222,37 @@ impl AppState {
         let mut node_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut node_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+        let mut add_node = |mut node: Node| {
+            let key = node.dedup_key();
+            // 1. If exact same physical node + same user credential already exists, it is a duplicate -> skip
+            if !node.server.is_empty() && node_keys.contains(&key) {
+                return;
+            }
+
+            // 2. If node name is already taken (e.g. multi-user scenario where different user subscriptions name the node identically):
+            // Disambiguate name so both users' nodes are preserved AND Mihomo kernel does not fail on duplicate proxy name!
+            if node_names.contains(&node.name) {
+                let suffix = node.credential_id()
+                    .map(|c| {
+                        let h = format!("{:04x}", (c.bytes().fold(0u32, |acc, b| acc.wrapping_add(b as u32)) ^ (c.len() as u32)) & 0xffff);
+                        format!(" [{}]", h)
+                    })
+                    .unwrap_or_else(|| " [2]".to_string());
+
+                let mut disambiguated = format!("{}{}", node.name, suffix);
+                let mut idx = 2;
+                while node_names.contains(&disambiguated) {
+                    disambiguated = format!("{} [{}]", node.name, idx);
+                    idx += 1;
+                }
+                node.name = disambiguated;
+            }
+
+            node_names.insert(node.name.clone());
+            node_keys.insert(key);
+            aggregated_nodes.push(node);
+        };
+
         for source in &enabled_sources {
             tracing::info!("Collecting nodes from enabled source: [{}] {} (type: {})", source.id, source.name, source.source_type);
             match source.source_type.as_str() {
@@ -230,12 +261,7 @@ impl AppState {
                     match client.fetch_nodes().await {
                         Ok(api_nodes) => {
                             for node in api_nodes {
-                                let key = node.dedup_key();
-                                if !node_names.contains(&node.name) && (node.server.is_empty() || !node_keys.contains(&key)) {
-                                        node_names.insert(node.name.clone());
-                                        node_keys.insert(key);
-                                        aggregated_nodes.push(node);
-                                }
+                                add_node(node);
                             }
                         }
                         Err(e) => {
@@ -254,12 +280,7 @@ impl AppState {
                                     if ext_l == "yaml" || ext_l == "yml" {
                                         if let Ok(parsed) = YamlParser::parse_file(path) {
                                             for node in parsed {
-                                                let key = node.dedup_key();
-                                                if !node_names.contains(&node.name) && (node.server.is_empty() || !node_keys.contains(&key)) {
-                                                        node_names.insert(node.name.clone());
-                                                        node_keys.insert(key);
-                                                        aggregated_nodes.push(node);
-                                                }
+                                                add_node(node);
                                             }
                                         }
                                     }
@@ -275,12 +296,7 @@ impl AppState {
                     if path.exists() && path.is_file() {
                         if let Ok(parsed) = YamlParser::parse_file(path) {
                             for node in parsed {
-                                let key = node.dedup_key();
-                                if !node_names.contains(&node.name) && (node.server.is_empty() || !node_keys.contains(&key)) {
-                                        node_names.insert(node.name.clone());
-                                        node_keys.insert(key);
-                                        aggregated_nodes.push(node);
-                                }
+                                add_node(node);
                             }
                         }
                     } else {

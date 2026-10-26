@@ -554,17 +554,23 @@ impl AppState {
             }
         }
 
-        std::fs::write(output_path, yaml_str)?;
+        std::fs::write(output_path, &yaml_str)?;
         let abs_path = std::fs::canonicalize(output_path).unwrap_or_else(|_| output_path.to_path_buf());
         let abs_path_str = abs_path.to_string_lossy().to_string();
         tracing::info!("Wrote generated meow-rs config to {}", abs_path_str);
 
-        // 1. First attempt to reload via API
-        if let Ok(()) = self.meow_reloader.reload(output_path).await {
+        // 1. First attempt to reload via API using in-memory payload (zero disk re-read)
+        if let Ok(()) = self.meow_reloader.reload_with_payload(&abs_path, &yaml_str).await {
             return Ok((abs_path_str, true));
         }
 
-        // 2. If API unreachable, automatically start/restart the embedded core process
+        // Brief retry after 250ms in case kernel was temporarily busy processing
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        if let Ok(()) = self.meow_reloader.reload_with_payload(&abs_path, &yaml_str).await {
+            return Ok((abs_path_str, true));
+        }
+
+        // 2. Only if API is genuinely unreachable (kernel down), auto-start core process
         tracing::info!("meow-rs API unreachable, attempting to auto-start embedded core process...");
         if self.core_manager.start_or_restart(&abs_path) {
             // Wait 1.5 seconds for core to initialize

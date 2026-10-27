@@ -560,6 +560,12 @@ impl TemplateRenderer {
         let guest_rule = format!("IN-USER,guest,{}", main_selector_name);
         writeln!(out, "{}", Self::format_yaml_rule(&guest_rule)).unwrap();
 
+        // 5f. Standard China and user private direct rules (for unauthenticated / guest proxy traffic)
+        let has_geoip = std::path::Path::new("geoip.metadb").exists()
+            || std::path::Path::new("geoip.dat").exists()
+            || std::path::Path::new("Country.mmdb").exists();
+        Self::write_standard_direct_rules(&mut out, has_geoip);
+
         // Base config extra rules, or default MATCH fallback
         let mut has_base_rules = false;
         if let Some(base) = base_config {
@@ -676,6 +682,63 @@ impl TemplateRenderer {
             format!("  - {}", Self::escape_yaml_str(rule))
         } else {
             format!("  - {}", rule)
+        }
+    }
+
+    /// Standard China & user-specified direct routing rules.
+    ///
+    /// Rules apply in top-to-bottom priority:
+    /// 1. User private & specified direct domains (*.stkoe.cn, *.windsing.cn, *.windsing.dpdns.org)
+    /// 2. Local network / LAN / Private IP direct (no-resolve prevents DNS leakage)
+    /// 3. China top-level domain (.cn) and popular domestic services (zero-delay instant direct)
+    /// 4. GeoIP CN (Mainland China IP address direct)
+    pub fn write_standard_direct_rules(out: &mut String, include_geoip: bool) {
+        // 1. User private & custom direct domains
+        writeln!(out, "  - DOMAIN-SUFFIX,stkoe.cn,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,windsing.cn,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,windsing.dpdns.org,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-KEYWORD,stkoe,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-KEYWORD,windsing,DIRECT").unwrap();
+
+        // 2. Local network / LAN / Private IP (no-resolve prevents DNS leakage)
+        writeln!(out, "  - GEOIP,lan,DIRECT,no-resolve").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,local,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,localhost,DIRECT").unwrap();
+        writeln!(out, "  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve").unwrap();
+        writeln!(out, "  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve").unwrap();
+        writeln!(out, "  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve").unwrap();
+        writeln!(out, "  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve").unwrap();
+        writeln!(out, "  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve").unwrap();
+
+        // 3. China top-level domain & popular services (Zero-delay direct)
+        writeln!(out, "  - DOMAIN-SUFFIX,cn,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,163.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,126.net,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,aliyun.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,alipay.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,taobao.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,tmall.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,qq.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,tencent.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,weixin.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,wechat.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,baidu.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,bilibili.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,bilivideo.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,jd.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,bytedance.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,douyin.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,toutiao.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,meituan.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,zhihu.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,weibo.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,sina.com.cn,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,xiaomi.com,DIRECT").unwrap();
+        writeln!(out, "  - DOMAIN-SUFFIX,huawei.com,DIRECT").unwrap();
+
+        // 4. China IP GeoIP direct (for clients that have GeoIP database)
+        if include_geoip {
+            writeln!(out, "  - GEOIP,CN,DIRECT").unwrap();
         }
     }
 
@@ -1032,6 +1095,7 @@ impl TemplateRenderer {
         }
 
         if !has_base_rules {
+            Self::write_standard_direct_rules(&mut out, true);
             let match_rule = format!("MATCH,{}", main_selector_name);
             writeln!(out, "  - {}", match_rule).unwrap();
         }

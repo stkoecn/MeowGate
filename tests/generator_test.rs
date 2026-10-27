@@ -352,6 +352,12 @@ fn test_clash_subscription_generation() {
     assert!(sub_yaml.contains("🚀 节点选择"));
     assert!(sub_yaml.contains("⚡ 自动选择"));
     assert!(sub_yaml.contains("MATCH,🚀 节点选择"));
+    // Standard direct rules
+    assert!(sub_yaml.contains("DOMAIN-SUFFIX,stkoe.cn,DIRECT"));
+    assert!(sub_yaml.contains("DOMAIN-SUFFIX,windsing.cn,DIRECT"));
+    assert!(sub_yaml.contains("DOMAIN-SUFFIX,windsing.dpdns.org,DIRECT"));
+    assert!(sub_yaml.contains("DOMAIN-SUFFIX,cn,DIRECT"));
+    assert!(sub_yaml.contains("GEOIP,CN,DIRECT"));
     // Must NOT contain IN-USER or authentication
     assert!(!sub_yaml.contains("IN-USER"));
     assert!(!sub_yaml.contains("authentication:"));

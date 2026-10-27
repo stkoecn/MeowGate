@@ -36,6 +36,7 @@ impl MeowReloader {
     }
 
     /// Triggers a hot reload via `PUT /configs` using a configuration file path on disk.
+    #[allow(dead_code)]
     pub async fn reload(&self, config_path: &Path) -> Result<()> {
         let absolute_path = std::fs::canonicalize(config_path)
             .unwrap_or_else(|_| config_path.to_path_buf());

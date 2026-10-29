@@ -40,7 +40,13 @@ pub async fn toggle_proxy(
     match set_system_proxy(port, target_enable) {
         Ok(new_status) => {
             let msg = if new_status.enabled {
-                format!("系统代理已开启 (127.0.0.1:{})", port)
+                if new_status.platform == "linux" {
+                    format!("系统代理已开启 (127.0.0.1:{})，新开终端将自动生效", port)
+                } else {
+                    format!("系统代理已开启 (127.0.0.1:{})", port)
+                }
+            } else if new_status.platform == "linux" {
+                "系统代理已关闭（若已有开启的终端窗口，可新开终端或执行 unset http_proxy 立即生效）".to_string()
             } else {
                 "系统代理已关闭".to_string()
             };

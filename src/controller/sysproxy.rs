@@ -242,6 +242,9 @@ pub fn set_system_proxy(port: u16, enable: bool) -> Result<SystemProxyStatus, St
     );
 
     let system_profile = std::path::Path::new("/etc/profile.d/meowgate-proxy.sh");
+    let apt_conf = std::path::Path::new("/etc/apt/apt.conf.d/99meowgate-proxy.conf");
+    let apt_dir = std::path::Path::new("/etc/apt/apt.conf.d");
+
     if enable {
         if let Err(_) = std::fs::write(system_profile, &env_content) {
             if let Ok(home) = std::env::var("HOME") {
@@ -249,9 +252,19 @@ pub fn set_system_proxy(port: u16, enable: bool) -> Result<SystemProxyStatus, St
                 let _ = std::fs::write(&user_env, &env_content);
             }
         }
+        if apt_dir.exists() {
+            let apt_content = format!(
+                "Acquire::http::Proxy \"{http}\";\nAcquire::https::Proxy \"{http}\";\n",
+                http = expected_http
+            );
+            let _ = std::fs::write(apt_conf, apt_content);
+        }
     } else {
         if system_profile.exists() {
             let _ = std::fs::remove_file(system_profile);
+        }
+        if apt_conf.exists() {
+            let _ = std::fs::remove_file(apt_conf);
         }
         if let Ok(home) = std::env::var("HOME") {
             let user_env = std::path::PathBuf::from(home).join(".meowgate-proxy.env");

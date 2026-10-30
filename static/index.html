@@ -3279,8 +3279,8 @@
                       <label class="switch" :title="src.is_base ? '点击关闭配置继承（当前已开启，该源中的代理组与规则会自动合并至网关及对外链接）' : '点击开启继承（默认关闭；开启后将继承该配置中的代理组、分流规则等高级设定并自动合并到对外链接）'">
                         <input 
                           type="checkbox" 
-                          :checked="src.is_base" 
-                          :disabled="src.toggling_base"
+                          :checked="!!src.is_base" 
+                          :disabled="!!src.toggling_base"
                           @change="toggleSourceBase(src, $event.target.checked)">
                         <span class="switch-slider" :style="src.is_base ? 'background-color: var(--accent);' : ''"></span>
                       </label>
@@ -5752,6 +5752,7 @@
               this.sources = list.map(s => ({
                 ...s,
                 toggling: false,
+                toggling_base: false,
                 deleting: false
               }));
             }
@@ -5773,6 +5774,7 @@
               this.sources = list.map(s => ({
                 ...s,
                 toggling: false,
+                toggling_base: false,
                 deleting: false
               }));
               this.showToast(json.message || '本地配置扫描完成', json.newly_added > 0 ? 'success' : 'info');

@@ -112,6 +112,38 @@ impl TemplateRenderer {
         mixed_port: u16,
         default_target: &str,
     ) -> Result<String> {
+        let base_docs = Self::parse_base_docs(base_config);
+        Self::render_with_all_groups_cached_docs(
+            nodes,
+            cached_proxies,
+            users,
+            region_groups,
+            ip_groups,
+            level_groups,
+            speed_groups,
+            inherited_groups,
+            unavailable,
+            &base_docs,
+            mixed_port,
+            default_target,
+        )
+    }
+
+    /// High-performance renderer using pre-parsed base config documents.
+    pub fn render_with_all_groups_cached_docs(
+        nodes: &[Node],
+        cached_proxies: Option<&str>,
+        users: &[User],
+        region_groups: &[crate::generator::groups::RegionGroup],
+        ip_groups: &[crate::generator::ip_groups::IpGroup],
+        level_groups: &[crate::generator::level_groups::LevelGroup],
+        speed_groups: &[crate::generator::speed_groups::SpeedGroup],
+        inherited_groups: &[crate::generator::inherited_groups::InheritedGroup],
+        unavailable: &HashSet<String>,
+        base_docs: &[serde_yaml::Mapping],
+        mixed_port: u16,
+        default_target: &str,
+    ) -> Result<String> {
         let est_proxies_len = cached_proxies.map(|s| s.len()).unwrap_or(nodes.len() * 300);
         let est_total_capacity = est_proxies_len + (users.len() + region_groups.len() * 2 + ip_groups.len() * 2 + level_groups.len() * 2) * 150 + 64 * 1024;
         let mut out = String::with_capacity(est_total_capacity);
@@ -127,9 +159,9 @@ impl TemplateRenderer {
         writeln!(out, "tcp-concurrent: true").unwrap();
 
         // 1b. Built-in high-performance concurrent DNS engine with Fake-IP
-        let has_base_dns = base_config
-            .map(|b| b.contains("dns:") || b.contains("\ndns:"))
-            .unwrap_or(false);
+        let has_base_dns = base_docs
+            .iter()
+            .any(|m| m.contains_key(&serde_yaml::Value::String("dns".to_string())));
         if !has_base_dns {
             writeln!(out, "dns:").unwrap();
             writeln!(out, "  enable: true").unwrap();
@@ -255,7 +287,7 @@ impl TemplateRenderer {
             }
         }
         // Include base config custom groups in 🚀 节点选择
-        Self::for_each_base_doc(base_config, |map| {
+        for map in base_docs {
             if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
                 for g in existing_groups {
                     if let Some(serde_yaml::Value::String(name)) = g.get(&serde_yaml::Value::String("name".to_string())) {
@@ -263,7 +295,7 @@ impl TemplateRenderer {
                     }
                 }
             }
-        });
+        }
         for node in &routable {
             writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
         }
@@ -530,7 +562,7 @@ impl TemplateRenderer {
             valid_gateway_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, false));
             valid_gateway_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, true));
         }
-        Self::for_each_base_doc(base_config, |map| {
+        for map in base_docs {
             if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
                 for g in existing_groups {
                     if let Some(name) = g.get(&serde_yaml::Value::String("name".to_string())).and_then(|n| n.as_str()) {
@@ -538,22 +570,28 @@ impl TemplateRenderer {
                     }
                 }
             }
-        });
+        }
 
         // Base config extra proxy-groups
-        Self::for_each_base_doc(base_config, |map| {
+        let mut base_groups_to_serialize = Vec::new();
+        for map in base_docs {
             if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
                 for g in existing_groups {
-                    let sanitized_group = Self::sanitize_base_proxy_group(g, &valid_gateway_targets);
-                    let seq = vec![sanitized_group];
-                    if let Ok(g_str) = serde_yaml::to_string(&seq) {
-                        for line in g_str.lines() {
-                            writeln!(out, "  {}", line).unwrap();
-                        }
-                    }
+                    base_groups_to_serialize.push(Self::sanitize_base_proxy_group(g, &valid_gateway_targets));
                 }
             }
-        });
+        }
+        if !base_groups_to_serialize.is_empty() {
+            if let Ok(g_str) = serde_yaml::to_string(&base_groups_to_serialize) {
+                for line in g_str.lines() {
+                    let trimmed = line.trim();
+                    if trimmed == "---" || trimmed.is_empty() {
+                        continue;
+                    }
+                    writeln!(out, "  {}", line).unwrap();
+                }
+            }
+        }
 
         // 5. Rules
         writeln!(out, "rules:").unwrap();
@@ -647,7 +685,7 @@ impl TemplateRenderer {
 
         // Base config extra rules, or default MATCH fallback
         let mut has_base_rules = false;
-        Self::for_each_base_doc(base_config, |map| {
+        for map in base_docs {
             if let Some(serde_yaml::Value::Sequence(existing_rules)) = map.get(&serde_yaml::Value::String("rules".to_string())) {
                 for r in existing_rules {
                     if let Some(s) = r.as_str() {
@@ -660,7 +698,7 @@ impl TemplateRenderer {
                     }
                 }
             }
-        });
+        }
 
         if !has_base_rules {
             let match_target = if !routable.is_empty() {
@@ -700,7 +738,7 @@ impl TemplateRenderer {
             seen_keys.insert("dns".to_string());
         }
 
-        Self::for_each_base_doc(base_config, |map| {
+        for map in base_docs {
             for (k, v) in map {
                 if let Some(k_str) = k.as_str() {
                     if seen_keys.contains(k_str) {
@@ -720,7 +758,7 @@ impl TemplateRenderer {
                     }
                 }
             }
-        });
+        }
 
         Ok(out)
     }
@@ -765,12 +803,10 @@ impl TemplateRenderer {
         out
     }
 
-    /// Formats a single rule line in `rules:`.
-    /// Iterates over every YAML document in `base_config` (which may contain multiple documents separated by `\n---\n`).
-    pub fn for_each_base_doc<F>(base: Option<&str>, mut f: F)
-    where
-        F: FnMut(&serde_yaml::Mapping),
-    {
+    /// Parses a base config YAML string into a vector of YAML mappings.
+    /// Supports multi-document YAML strings separated by `\n---\n`.
+    pub fn parse_base_docs(base: Option<&str>) -> Vec<serde_yaml::Mapping> {
+        let mut docs = Vec::new();
         if let Some(b) = base {
             for part in b.split("\n---\n") {
                 let part_trimmed = part.trim();
@@ -778,9 +814,22 @@ impl TemplateRenderer {
                     continue;
                 }
                 if let Ok(serde_yaml::Value::Mapping(map)) = serde_yaml::from_str::<serde_yaml::Value>(part_trimmed) {
-                    f(&map);
+                    docs.push(map);
                 }
             }
+        }
+        docs
+    }
+
+    /// Formats a single rule line in `rules:`.
+    /// Iterates over every YAML document in `base_config` (which may contain multiple documents separated by `\n---\n`).
+    #[allow(dead_code)]
+    pub fn for_each_base_doc<F>(base: Option<&str>, mut f: F)
+    where
+        F: FnMut(&serde_yaml::Mapping),
+    {
+        for doc in &Self::parse_base_docs(base) {
+            f(doc);
         }
     }
 
@@ -887,6 +936,7 @@ impl TemplateRenderer {
     /// Contains standard client inbounds (port 7890), high-performance Fake-IP DNS,
     /// all active physical proxies, standard PROXY and AUTO selectors, and smart
     /// Level / Region / IP policy groups, with clean MATCH,PROXY rules.
+    #[allow(dead_code)]
     pub fn render_clash_subscription(
         nodes: &[Node],
         cached_proxies: Option<&str>,
@@ -897,6 +947,32 @@ impl TemplateRenderer {
         inherited_groups: &[crate::generator::inherited_groups::InheritedGroup],
         unavailable: &HashSet<String>,
         base_config: Option<&str>,
+    ) -> Result<String> {
+        let base_docs = Self::parse_base_docs(base_config);
+        Self::render_clash_subscription_docs(
+            nodes,
+            cached_proxies,
+            region_groups,
+            ip_groups,
+            level_groups,
+            speed_groups,
+            inherited_groups,
+            unavailable,
+            &base_docs,
+        )
+    }
+
+    /// High-performance Clash subscription renderer using pre-parsed base config documents.
+    pub fn render_clash_subscription_docs(
+        nodes: &[Node],
+        cached_proxies: Option<&str>,
+        region_groups: &[crate::generator::groups::RegionGroup],
+        ip_groups: &[crate::generator::ip_groups::IpGroup],
+        level_groups: &[crate::generator::level_groups::LevelGroup],
+        speed_groups: &[crate::generator::speed_groups::SpeedGroup],
+        inherited_groups: &[crate::generator::inherited_groups::InheritedGroup],
+        unavailable: &HashSet<String>,
+        base_docs: &[serde_yaml::Mapping],
     ) -> Result<String> {
         let cached_len = cached_proxies.map(|s| s.len()).unwrap_or(0);
         let mut out = String::with_capacity(256 * 1024 + cached_len);
@@ -913,9 +989,9 @@ impl TemplateRenderer {
         writeln!(out).unwrap();
 
         // 2. High-performance DNS (Fake-IP mode with public high-speed resolvers)
-        let has_base_dns = base_config
-            .map(|b| b.contains("dns:") || b.contains("\ndns:"))
-            .unwrap_or(false);
+        let has_base_dns = base_docs
+            .iter()
+            .any(|m| m.contains_key(&serde_yaml::Value::String("dns".to_string())));
         if !has_base_dns {
             writeln!(out, "dns:").unwrap();
             writeln!(out, "  enable: true").unwrap();
@@ -988,7 +1064,7 @@ impl TemplateRenderer {
             }
         }
         // Include base config custom groups in 🚀 节点选择
-        Self::for_each_base_doc(base_config, |map| {
+        for map in base_docs {
             if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
                 for g in existing_groups {
                     if let Some(serde_yaml::Value::String(name)) = g.get(&serde_yaml::Value::String("name".to_string())) {
@@ -996,7 +1072,7 @@ impl TemplateRenderer {
                     }
                 }
             }
-        });
+        }
         for node in &routable {
             writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
         }
@@ -1240,7 +1316,7 @@ impl TemplateRenderer {
         }
 
         // Collect names of all base proxy-groups so inter-group references remain valid
-        Self::for_each_base_doc(base_config, |map| {
+        for map in base_docs {
             if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
                 for g in existing_groups {
                     if let Some(name) = g.get(&serde_yaml::Value::String("name".to_string())).and_then(|n| n.as_str()) {
@@ -1248,28 +1324,34 @@ impl TemplateRenderer {
                     }
                 }
             }
-        });
+        }
 
         // Base config extra proxy-groups in subscription
-        Self::for_each_base_doc(base_config, |map| {
+        let mut base_groups_to_serialize = Vec::new();
+        for map in base_docs {
             if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
                 for g in existing_groups {
-                    let sanitized_group = Self::sanitize_base_proxy_group(g, &valid_sub_targets);
-                    let seq = vec![sanitized_group];
-                    if let Ok(g_str) = serde_yaml::to_string(&seq) {
-                        for line in g_str.lines() {
-                            writeln!(out, "  {}", line).unwrap();
-                        }
-                    }
+                    base_groups_to_serialize.push(Self::sanitize_base_proxy_group(g, &valid_sub_targets));
                 }
             }
-        });
+        }
+        if !base_groups_to_serialize.is_empty() {
+            if let Ok(g_str) = serde_yaml::to_string(&base_groups_to_serialize) {
+                for line in g_str.lines() {
+                    let trimmed = line.trim();
+                    if trimmed == "---" || trimmed.is_empty() {
+                        continue;
+                    }
+                    writeln!(out, "  {}", line).unwrap();
+                }
+            }
+        }
 
         // 5. Rules section
         writeln!(out).unwrap();
         writeln!(out, "rules:").unwrap();
         let mut has_base_rules = false;
-        Self::for_each_base_doc(base_config, |map| {
+        for map in base_docs {
             if let Some(serde_yaml::Value::Sequence(existing_rules)) = map.get(&serde_yaml::Value::String("rules".to_string())) {
                 for r in existing_rules {
                     if let Some(s) = r.as_str() {
@@ -1278,7 +1360,7 @@ impl TemplateRenderer {
                     }
                 }
             }
-        });
+        }
 
         if !has_base_rules {
             Self::write_standard_direct_rules(&mut out, true);
@@ -1314,7 +1396,7 @@ impl TemplateRenderer {
             seen_sub_keys.insert("dns".to_string());
         }
 
-        Self::for_each_base_doc(base_config, |map| {
+        for map in base_docs {
             for (k, v) in map {
                 if let Some(k_str) = k.as_str() {
                     if seen_sub_keys.contains(k_str) {
@@ -1334,7 +1416,380 @@ impl TemplateRenderer {
                     }
                 }
             }
-        });
+        }
+
+        Ok(out)
+    }
+
+    /// Generates a standalone Clash client subscription YAML where all proxies and routes
+    /// point through MeowGate's gateway port (default :9565) using HTTP proxy entries
+    /// with isolated user credentials and synthetic strategy group accounts.
+    #[allow(dead_code)]
+    pub fn render_clash_subscription_gateway(
+        gateway_host: &str,
+        gateway_port: u16,
+        nodes: &[Node],
+        users: &[User],
+        region_groups: &[crate::generator::groups::RegionGroup],
+        ip_groups: &[crate::generator::ip_groups::IpGroup],
+        level_groups: &[crate::generator::level_groups::LevelGroup],
+        speed_groups: &[crate::generator::speed_groups::SpeedGroup],
+        inherited_groups: &[crate::generator::inherited_groups::InheritedGroup],
+        unavailable: &HashSet<String>,
+        base_config: Option<&str>,
+    ) -> Result<String> {
+        let base_docs = Self::parse_base_docs(base_config);
+        Self::render_clash_subscription_gateway_docs(
+            gateway_host,
+            gateway_port,
+            nodes,
+            users,
+            region_groups,
+            ip_groups,
+            level_groups,
+            speed_groups,
+            inherited_groups,
+            unavailable,
+            &base_docs,
+        )
+    }
+
+    /// High-performance Clash gateway subscription renderer using pre-parsed base config documents.
+    #[allow(dead_code)]
+    pub fn render_clash_subscription_gateway_docs(
+        gateway_host: &str,
+        gateway_port: u16,
+        nodes: &[Node],
+        users: &[User],
+        region_groups: &[crate::generator::groups::RegionGroup],
+        _ip_groups: &[crate::generator::ip_groups::IpGroup],
+        level_groups: &[crate::generator::level_groups::LevelGroup],
+        speed_groups: &[crate::generator::speed_groups::SpeedGroup],
+        inherited_groups: &[crate::generator::inherited_groups::InheritedGroup],
+        unavailable: &HashSet<String>,
+        base_docs: &[serde_yaml::Mapping],
+    ) -> Result<String> {
+        let mut out = String::with_capacity(128 * 1024);
+
+        // 1. Client inbound ports & basic options
+        writeln!(out, "port: 7890").unwrap();
+        writeln!(out, "socks-port: 7891").unwrap();
+        writeln!(out, "mixed-port: 7890").unwrap();
+        writeln!(out, "allow-lan: true").unwrap();
+        writeln!(out, "mode: rule").unwrap();
+        writeln!(out, "log-level: info").unwrap();
+        writeln!(out, "unified-delay: true").unwrap();
+        writeln!(out, "tcp-concurrent: true").unwrap();
+        writeln!(out).unwrap();
+
+        // 2. High-performance DNS (Fake-IP mode with public high-speed resolvers)
+        let has_base_dns = base_docs
+            .iter()
+            .any(|m| m.contains_key(&serde_yaml::Value::String("dns".to_string())));
+        if !has_base_dns {
+            writeln!(out, "dns:").unwrap();
+            writeln!(out, "  enable: true").unwrap();
+            writeln!(out, "  ipv6: false").unwrap();
+            writeln!(out, "  enhanced-mode: fake-ip").unwrap();
+            writeln!(out, "  fake-ip-range: 198.18.0.1/16").unwrap();
+            writeln!(out, "  nameserver:").unwrap();
+            writeln!(out, "    - 223.5.5.5").unwrap();
+            writeln!(out, "    - 119.29.29.29").unwrap();
+            writeln!(out, "    - 180.76.76.76").unwrap();
+            writeln!(out, "    - 1.1.1.1").unwrap();
+            writeln!(out).unwrap();
+        }
+
+        // 3. Proxies section (all routing through MeowGate)
+        writeln!(out, "proxies:").unwrap();
+        let user_map: std::collections::HashMap<_, _> = users
+            .iter()
+            .map(|u| (u.node_name.as_str(), u))
+            .collect();
+
+        let routable: Vec<&Node> = nodes
+            .iter()
+            .filter(|n| !unavailable.contains(&n.name))
+            .collect();
+
+        // 3a. Node proxies
+        for node in &routable {
+            let (u, p) = if let Some(user) = user_map.get(node.name.as_str()) {
+                (user.username.as_str(), user.password.as_str())
+            } else {
+                ("guest", "guest")
+            };
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&node.name)).unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: {}", Self::format_yaml_str(u)).unwrap();
+            writeln!(out, "    password: {}", Self::format_yaml_str(p)).unwrap();
+        }
+
+        // 3b. Region gateway proxies
+        for rg in region_groups {
+            if rg.nodes.is_empty() {
+                continue;
+            }
+            let auto_p_name = format!("{} {}-自动 [网关]", rg.flag, rg.code);
+            let fb_p_name = format!("{} {}-故障转移 [网关]", rg.flag, rg.code);
+            let u_auto = rg.code.to_lowercase();
+            let u_fb = format!("{}-fb", rg.code.to_lowercase());
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_p_name)).unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: {}", Self::format_yaml_str(&u_auto)).unwrap();
+            writeln!(out, "    password: {}", Self::format_yaml_str(&u_auto)).unwrap();
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_p_name)).unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: {}", Self::format_yaml_str(&u_fb)).unwrap();
+            writeln!(out, "    password: {}", Self::format_yaml_str(&u_fb)).unwrap();
+        }
+
+        // 3c. Level gateway proxies
+        for lg in level_groups {
+            if lg.nodes.is_empty() {
+                continue;
+            }
+            let auto_p_name = format!("{} [网关]", crate::generator::level_groups::level_group_name(&lg.code, false));
+            let fb_p_name = format!("{} [网关]", crate::generator::level_groups::level_group_name(&lg.code, true));
+            let u_auto = lg.code.to_lowercase();
+            let u_fb = format!("{}-fb", lg.code.to_lowercase());
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_p_name)).unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: {}", Self::format_yaml_str(&u_auto)).unwrap();
+            writeln!(out, "    password: {}", Self::format_yaml_str(&u_auto)).unwrap();
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_p_name)).unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: {}", Self::format_yaml_str(&u_fb)).unwrap();
+            writeln!(out, "    password: {}", Self::format_yaml_str(&u_fb)).unwrap();
+        }
+
+        // 3d. Speed gateway proxies
+        for sg in speed_groups {
+            if sg.nodes.is_empty() {
+                continue;
+            }
+            let auto_p_name = format!("{} [网关]", crate::generator::speed_groups::speed_group_name(&sg.code, false));
+            let fb_p_name = format!("{} [网关]", crate::generator::speed_groups::speed_group_name(&sg.code, true));
+            let u_auto = sg.code.to_lowercase();
+            let u_fb = format!("{}-fb", sg.code.to_lowercase());
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_p_name)).unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: {}", Self::format_yaml_str(&u_auto)).unwrap();
+            writeln!(out, "    password: {}", Self::format_yaml_str(&u_auto)).unwrap();
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_p_name)).unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: {}", Self::format_yaml_str(&u_fb)).unwrap();
+            writeln!(out, "    password: {}", Self::format_yaml_str(&u_fb)).unwrap();
+        }
+
+        // 3e. Inherited groups gateway proxies
+        for ig in inherited_groups {
+            if ig.nodes.is_empty() {
+                continue;
+            }
+            let p_name = format!("{} [网关]", ig.name);
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&p_name)).unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: {}", Self::format_yaml_str(&ig.name)).unwrap();
+            writeln!(out, "    password: {}", Self::format_yaml_str(&ig.name)).unwrap();
+        }
+
+        // If no proxies at all, provide a fallback guest proxy
+        let total_proxies = routable.len()
+            + region_groups.iter().filter(|r| !r.nodes.is_empty()).count() * 2
+            + level_groups.iter().filter(|l| !l.nodes.is_empty()).count() * 2
+            + speed_groups.iter().filter(|s| !s.nodes.is_empty()).count() * 2
+            + inherited_groups.iter().filter(|i| !i.nodes.is_empty()).count();
+        if total_proxies == 0 {
+            writeln!(out, "  - name: \"MeowGate-Direct\"").unwrap();
+            writeln!(out, "    type: http").unwrap();
+            writeln!(out, "    server: {}", Self::format_yaml_str(gateway_host)).unwrap();
+            writeln!(out, "    port: {}", gateway_port).unwrap();
+            writeln!(out, "    username: guest").unwrap();
+            writeln!(out, "    password: guest").unwrap();
+        }
+        writeln!(out).unwrap();
+
+        // 4. Proxy-groups section
+        writeln!(out, "proxy-groups:").unwrap();
+        let main_selector_name = Self::format_main_selector_name();
+        writeln!(out, "  - name: {}", Self::format_yaml_str(&main_selector_name)).unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        writeln!(out, "      - ⚡ 自动选择").unwrap();
+        writeln!(out, "      - 📶 延时分级").unwrap();
+        writeln!(out, "      - ⚡ 速度梯队").unwrap();
+        writeln!(out, "      - 🌍 地区选择").unwrap();
+
+        // Place fast speed group and lv1 as top choices in 🚀 节点选择 if present
+        if speed_groups.iter().any(|sg| sg.code == "fast" && !sg.nodes.is_empty()) {
+            let fast_p_name = format!("{} [网关]", crate::generator::speed_groups::speed_group_name("fast", false));
+            writeln!(out, "      - {}", Self::format_yaml_str(&fast_p_name)).unwrap();
+        }
+        if level_groups.iter().any(|lg| lg.code == "lv1" && !lg.nodes.is_empty()) {
+            let lv1_p_name = format!("{} [网关]", crate::generator::level_groups::level_group_name("lv1", false));
+            writeln!(out, "      - {}", Self::format_yaml_str(&lv1_p_name)).unwrap();
+        }
+        writeln!(out, "      - DIRECT").unwrap();
+
+        // Non-empty country selectors
+        for rg in region_groups {
+            if !rg.nodes.is_empty() {
+                let country_name = crate::generator::groups::region_country_name(&rg.code);
+                writeln!(out, "      - {}", Self::format_yaml_str(&country_name)).unwrap();
+            }
+        }
+
+        // Inherited groups
+        for ig in inherited_groups {
+            if !ig.nodes.is_empty() {
+                let p_name = format!("{} [网关]", ig.name);
+                writeln!(out, "      - {}", Self::format_yaml_str(&p_name)).unwrap();
+            }
+        }
+
+        // Routable nodes
+        for node in &routable {
+            writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
+        }
+
+        if total_proxies == 0 {
+            writeln!(out, "      - \"MeowGate-Direct\"").unwrap();
+        }
+
+        // 4b. 📶 延时分级
+        writeln!(out, "  - name: 📶 延时分级").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_lvl = false;
+        for lg in level_groups {
+            if !lg.nodes.is_empty() {
+                has_lvl = true;
+                let auto_p_name = format!("{} [网关]", crate::generator::level_groups::level_group_name(&lg.code, false));
+                writeln!(out, "      - {}", Self::format_yaml_str(&auto_p_name)).unwrap();
+            }
+        }
+        if !has_lvl {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 4c. ⚡ 速度梯队
+        writeln!(out, "  - name: ⚡ 速度梯队").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_spd = false;
+        for sg in speed_groups {
+            if !sg.nodes.is_empty() {
+                has_spd = true;
+                let auto_p_name = format!("{} [网关]", crate::generator::speed_groups::speed_group_name(&sg.code, false));
+                writeln!(out, "      - {}", Self::format_yaml_str(&auto_p_name)).unwrap();
+            }
+        }
+        if !has_spd {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 4d. 🌍 地区选择
+        writeln!(out, "  - name: 🌍 地区选择").unwrap();
+        writeln!(out, "    type: select").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        let mut has_rg = false;
+        for rg in region_groups {
+            if !rg.nodes.is_empty() {
+                has_rg = true;
+                let country_name = crate::generator::groups::region_country_name(&rg.code);
+                writeln!(out, "      - {}", Self::format_yaml_str(&country_name)).unwrap();
+            }
+        }
+        if !has_rg {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 4e. Country selectors (e.g. 🇭🇰 香港)
+        for rg in region_groups {
+            if rg.nodes.is_empty() {
+                continue;
+            }
+            let country_name = crate::generator::groups::region_country_name(&rg.code);
+            let auto_p_name = format!("{} {}-自动 [网关]", rg.flag, rg.code);
+            let fb_p_name = format!("{} {}-故障转移 [网关]", rg.flag, rg.code);
+
+            writeln!(out, "  - name: {}", Self::format_yaml_str(&country_name)).unwrap();
+            writeln!(out, "    type: select").unwrap();
+            writeln!(out, "    proxies:").unwrap();
+            writeln!(out, "      - {}", Self::format_yaml_str(&auto_p_name)).unwrap();
+            writeln!(out, "      - {}", Self::format_yaml_str(&fb_p_name)).unwrap();
+            for n in &rg.nodes {
+                writeln!(out, "      - {}", Self::format_yaml_str(n)).unwrap();
+            }
+        }
+
+        // 4f. ⚡ 自动选择 url-test
+        writeln!(out, "  - name: ⚡ 自动选择").unwrap();
+        writeln!(out, "    type: url-test").unwrap();
+        writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
+        writeln!(out, "    interval: 300").unwrap();
+        writeln!(out, "    lazy: true").unwrap();
+        writeln!(out, "    proxies:").unwrap();
+        if !routable.is_empty() {
+            for node in &routable {
+                writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
+            }
+        } else if has_rg {
+            for rg in region_groups {
+                if !rg.nodes.is_empty() {
+                    let auto_p_name = format!("{} {}-自动 [网关]", rg.flag, rg.code);
+                    writeln!(out, "      - {}", Self::format_yaml_str(&auto_p_name)).unwrap();
+                }
+            }
+        } else if total_proxies == 0 {
+            writeln!(out, "      - \"MeowGate-Direct\"").unwrap();
+        } else {
+            writeln!(out, "      - DIRECT").unwrap();
+        }
+
+        // 5. Rules section
+        writeln!(out).unwrap();
+        writeln!(out, "rules:").unwrap();
+        let mut has_base_rules = false;
+        for map in base_docs {
+            if let Some(serde_yaml::Value::Sequence(existing_rules)) = map.get(&serde_yaml::Value::String("rules".to_string())) {
+                for r in existing_rules {
+                    if let Some(s) = r.as_str() {
+                        has_base_rules = true;
+                        writeln!(out, "{}", Self::format_yaml_rule(s)).unwrap();
+                    }
+                }
+            }
+        }
+
+        if !has_base_rules {
+            Self::write_standard_direct_rules(&mut out, true);
+            let match_rule = format!("MATCH,{}", main_selector_name);
+            writeln!(out, "  - {}", match_rule).unwrap();
+        }
 
         Ok(out)
     }

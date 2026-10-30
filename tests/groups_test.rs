@@ -126,18 +126,22 @@ async fn test_groups_aggregation() {
     *state.nodes.write().await = nodes.clone();
 
     // Add probe results
-    let mut pr_hk = NodeProbeResult::default();
-    pr_hk.latency_ms = Some(80);
-    pr_hk.outbound_ip = Some("103.1.2.3".to_string());
-    pr_hk.country_code = Some("HK".to_string());
-    pr_hk.location = Some("Hong Kong".to_string());
+    let pr_hk = NodeProbeResult {
+        latency_ms: Some(80),
+        outbound_ip: Some("103.1.2.3".to_string()),
+        country_code: Some("HK".to_string()),
+        location: Some("Hong Kong".to_string()),
+        ..Default::default()
+    };
     state.update_probe_result("HK-Fast".to_string(), pr_hk.clone()).await;
 
-    let mut pr_us = NodeProbeResult::default();
-    pr_us.latency_ms = Some(250);
-    pr_us.outbound_ip = Some("104.5.6.7".to_string());
-    pr_us.country_code = Some("US".to_string());
-    pr_us.location = Some("Los Angeles".to_string());
+    let pr_us = NodeProbeResult {
+        latency_ms: Some(250),
+        outbound_ip: Some("104.5.6.7".to_string()),
+        country_code: Some("US".to_string()),
+        location: Some("Los Angeles".to_string()),
+        ..Default::default()
+    };
     state.update_probe_result("US-Mid".to_string(), pr_us.clone()).await;
 
     // Check level groups generator

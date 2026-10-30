@@ -86,7 +86,7 @@ async fn test_base_config_inheritance_toggle() {
 
     // Create a temporary base config file
     let tmp_dir = std::env::temp_dir();
-    let base_file = tmp_dir.join("test_meowgate_base.yaml");
+    let base_file = tmp_dir.join(format!("test_meowgate_base_{}.yaml", rand::random::<u64>()));
     let base_content = r#"
 proxy-groups:
   - name: "CUSTOM-BASE-GROUP"

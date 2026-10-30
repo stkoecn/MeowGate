@@ -67,16 +67,16 @@ pub fn inherited_users(groups: &[InheritedGroup]) -> Vec<User> {
     users
 }
 
-/// Extracts inherited proxy groups from a base config YAML string.
-pub fn extract_inherited_groups(
-    base_config: Option<&str>,
+/// Extracts inherited proxy groups from parsed base config YAML documents.
+pub fn extract_inherited_groups_from_docs(
+    docs: &[serde_yaml::Mapping],
     unavailable: &HashSet<String>,
     source_name: Option<&str>,
 ) -> Vec<InheritedGroup> {
     let mut groups = Vec::new();
     let mut seen_names = HashSet::new();
 
-    crate::generator::template::TemplateRenderer::for_each_base_doc(base_config, |map| {
+    for map in docs {
         if let Some(serde_yaml::Value::Sequence(seq)) =
             map.get(&serde_yaml::Value::String("proxy-groups".to_string()))
         {
@@ -171,7 +171,18 @@ pub fn extract_inherited_groups(
                 }
             }
         }
-    });
+    }
 
     groups
+}
+
+/// Extracts inherited proxy groups from a base config YAML string.
+#[allow(dead_code)]
+pub fn extract_inherited_groups(
+    base_config: Option<&str>,
+    unavailable: &HashSet<String>,
+    source_name: Option<&str>,
+) -> Vec<InheritedGroup> {
+    let docs = crate::generator::template::TemplateRenderer::parse_base_docs(base_config);
+    extract_inherited_groups_from_docs(&docs, unavailable, source_name)
 }

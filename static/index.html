@@ -1450,23 +1450,23 @@
       </button>
       <button @click="switchToRegions()" :class="activeView === 'regions' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
         <i data-lucide="globe" style="width: 13px; height: 13px; margin-right: 4px;"></i>地区分组
-        <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="regions.length"></span>
+        <span class="badge" x-show="loadedViews.regions" style="margin-left: 6px; font-size: 10px;" x-text="regions.length"></span>
       </button>
       <button @click="switchToIpGroups()" :class="activeView === 'ip_groups' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
         <i data-lucide="network" style="width: 13px; height: 13px; margin-right: 4px;"></i>IP 分组
-        <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="ipGroups.length"></span>
+        <span class="badge" x-show="loadedViews.ip_groups" style="margin-left: 6px; font-size: 10px;" x-text="ipGroups.length"></span>
       </button>
       <button @click="switchToLevelGroups()" :class="activeView === 'level_groups' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
         <i data-lucide="gauge" style="width: 13px; height: 13px; margin-right: 4px;"></i>分级分组
-        <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="levelGroups.length"></span>
+        <span class="badge" x-show="loadedViews.level_groups" style="margin-left: 6px; font-size: 10px;" x-text="levelGroups.length"></span>
       </button>
       <button @click="switchToSpeedGroups()" :class="activeView === 'speed_groups' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
         <i data-lucide="zap" style="width: 13px; height: 13px; margin-right: 4px;"></i>速度分组
-        <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="speedGroups.length"></span>
+        <span class="badge" x-show="loadedViews.speed_groups" style="margin-left: 6px; font-size: 10px;" x-text="speedGroups.length"></span>
       </button>
       <button @click="switchToInheritedGroups()" :class="activeView === 'inherited_groups' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
         <i data-lucide="layers" style="width: 13px; height: 13px; margin-right: 4px;"></i>继承分组
-        <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="inheritedGroups.length"></span>
+        <span class="badge" x-show="loadedViews.inherited_groups" style="margin-left: 6px; font-size: 10px;" x-text="inheritedGroups.length"></span>
       </button>
     </div>
 
@@ -4094,15 +4094,75 @@
       };
     })();
 
-    // Frame-coalesced Lucide icon updater to prevent layout thrashing
+    // Global static lookup maps & pre-allocated placeholders to eliminate allocations during render
+    const COUNTRY_MAP = Object.freeze({
+      'AE': '阿联酋', 'AM': '亚美尼亚', 'AR': '阿根廷', 'AU': '澳大利亚', 'AZ': '阿塞拜疆',
+      'BD': '孟加拉', 'BG': '保加利亚', 'BR': '巴西', 'CA': '加拿大', 'CH': '瑞士',
+      'CL': '智利', 'CO': '哥伦比亚', 'CZ': '捷克', 'DE': '德国', 'ES': '西班牙',
+      'FI': '芬兰', 'FR': '法国', 'GB': '英国', 'GE': '格鲁吉亚', 'HK': '香港',
+      'ID': '印尼', 'IE': '爱尔兰', 'IL': '以色列', 'IN': '印度', 'IS': '冰岛',
+      'IT': '意大利', 'JP': '日本', 'KR': '韩国', 'KZ': '哈萨克斯坦', 'LT': '立陶宛',
+      'LU': '卢森堡', 'LV': '拉脱维亚', 'MD': '摩尔多瓦', 'MO': '澳门', 'MX': '墨西哥',
+      'MY': '马来西亚', 'NG': '尼日利亚', 'NL': '荷兰', 'NO': '挪威', 'NZ': '新西兰',
+      'PH': '菲律宾', 'PK': '巴基斯坦', 'PL': '波兰', 'RO': '罗马尼亚', 'RS': '塞尔维亚',
+      'RU': '俄罗斯', 'SE': '瑞典', 'SG': '新加坡', 'TH': '泰国', 'TR': '土耳其',
+      'TW': '台湾', 'UA': '乌克兰', 'US': '美国', 'VN': '越南', 'ZA': '南非'
+    });
+
+    const UNPROBED_SQUARE = Object.freeze({
+      unprobed: true,
+      ok: false,
+      latency_ms: null,
+      checked_at: null
+    });
+    const UNPROBED_SQUARES_10 = Object.freeze(Array.from({ length: 10 }, () => UNPROBED_SQUARE));
+    const EMPTY_HIST_10 = Object.freeze(new Array(10).fill(null));
+
+    // Frame-coalesced Lucide icon updater to prevent layout thrashing and pause during user typing
     (function() {
-      const _orig = window.lucide && window.lucide.createIcons;
+      const _orig = (window.lucide && window.lucide.createIcons) ? window.lucide.createIcons.bind(window.lucide) : null;
       let _raf = null;
-      window.refreshIcons = function() {
+      let _isTyping = false;
+      let _typingTimer = null;
+      let _pendingRefresh = false;
+
+      function onTyping() {
+        _isTyping = true;
+        clearTimeout(_typingTimer);
+        _typingTimer = setTimeout(() => {
+          _isTyping = false;
+          if (_pendingRefresh) {
+            _pendingRefresh = false;
+            window.refreshIcons(true);
+          }
+        }, 300);
+      }
+
+      window.addEventListener('input', onTyping, { passive: true });
+      window.addEventListener('keydown', (e) => {
+        const tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA') {
+          onTyping();
+        }
+      }, { passive: true });
+
+      window.refreshIcons = function(force = false) {
+        if (_isTyping && !force) {
+          _pendingRefresh = true;
+          return;
+        }
         if (_raf) return;
         _raf = requestAnimationFrame(() => {
           _raf = null;
-          if (_orig) _orig();
+          try {
+            if (_orig) {
+              _orig();
+            } else if (window.lucide && typeof window.lucide.createIcons === 'function') {
+              window.lucide.createIcons();
+            }
+          } catch (e) {
+            // safe fallback
+          }
         });
       };
       if (window.lucide) {
@@ -4207,6 +4267,41 @@
         blockFailLastN: 0,
         pageJumpInput: '',
 
+        // Tab lazy loading flags to avoid redundant concurrent requests
+        loadedViews: {
+          nodes: false,
+          regions: false,
+          ip_groups: false,
+          level_groups: false,
+          speed_groups: false,
+          inherited_groups: false
+        },
+
+        // Reactive getter cache keys & versions to avoid running O(N) filters on non-data re-renders
+        _nodesVersion: 0,
+        _filteredNodesCache: null,
+        _filteredNodesKey: '',
+        _regionsVersion: 0,
+        _filteredRegionsCache: null,
+        _filteredRegionsKey: '',
+        _ipGroupsVersion: 0,
+        _filteredIpGroupsCache: null,
+        _filteredIpGroupsKey: '',
+        _levelGroupsVersion: 0,
+        _filteredLevelGroupsCache: null,
+        _filteredLevelGroupsKey: '',
+        _speedGroupsVersion: 0,
+        _filteredSpeedGroupsCache: null,
+        _filteredSpeedGroupsKey: '',
+        _inheritedGroupsVersion: 0,
+        _filteredInheritedGroupsCache: null,
+        _filteredInheritedGroupsKey: '',
+        _healthVersion: 0,
+        _filteredHealthNodesCache: null,
+        _filteredHealthNodesKey: '',
+        _cachedConfigPreviewText: '',
+        _cachedHighlightedConfig: '',
+
         goToPage(p) {
           const target = parseInt(p, 10);
           if (isNaN(target) || target < 1) { this.showToast('请输入有效页码', 'error'); return; }
@@ -4271,9 +4366,6 @@
           this.fetchStatus();
           this.fetchSources();
           this.fetchSystemProxy();
-          this.fetchLevelGroups();
-          this.fetchSpeedGroups();
-          this.fetchInheritedGroups();
           this.fetchHealth(true);
 
           this.$watch('subMode', () => { this.renderSubQrCode(); });
@@ -4471,7 +4563,7 @@
               this.status.meowOnline = false;
             }
           }
-          this.$nextTick(() => lucide.createIcons());
+          if (!isBackground) this.$nextTick(() => lucide.createIcons());
         },
 
         // ==================== Node health / lifecycle ====================
@@ -4500,14 +4592,22 @@
 
         get filteredHealthNodes() {
           const q = (this.healthSearch || '').toLowerCase();
+          const abnormal = !!this.healthOnlyAbnormal;
+          const key = `${(this.health.nodes || []).length}_${q}_${abnormal}_${this._healthVersion}`;
+          if (this._filteredHealthNodesCache && this._filteredHealthNodesKey === key) {
+            return this._filteredHealthNodesCache;
+          }
           let list = this.health.nodes || [];
-          if (this.healthOnlyAbnormal) {
+          if (abnormal) {
             list = list.filter(h => h.state === 'down' || h.state === 'disabled' || h.state === 'recovering');
           }
           if (q) list = list.filter(h => (h.node_name || '').toLowerCase().includes(q));
           // down/disabled first, then recovering, then by name
           const rank = s => (s === 'disabled' ? 0 : s === 'down' ? 1 : s === 'recovering' ? 2 : 3);
-          return list.slice().sort((a, b) => rank(a.state) - rank(b.state) || a.node_name.localeCompare(b.node_name));
+          const res = list.slice().sort((a, b) => rank(a.state) - rank(b.state) || a.node_name.localeCompare(b.node_name));
+          this._filteredHealthNodesCache = res;
+          this._filteredHealthNodesKey = key;
+          return res;
         },
 
         get healthCountdownText() {
@@ -4594,6 +4694,7 @@
                 this.health.nodes = rows;
                 this.health.byName = byName;
               }
+              this._healthVersion++;
             } else if (!isBackground) {
               this.showToast('健康状态加载失败: ' + await res.text(), 'error');
             }
@@ -4765,6 +4866,8 @@
             }
 
             await this.fetchStatus(true);
+            this.loadedViews.nodes = true;
+            this.invalidateNodesCache();
           } catch (e) {
             console.error(e);
             this.showToast('加载数据错误: ' + e.message, 'error');
@@ -4774,14 +4877,16 @@
           }
         },
 
+        invalidateNodesCache() {
+          this._nodesVersion = (this._nodesVersion || 0) + 1;
+          this._cachedNormalCount = null;
+          this._cachedFailedCount = null;
+          this._filteredNodesCache = null;
+          this._filteredNodesKey = '';
+        },
+
         get nodesWithUsers() {
-          return this.nodes.map(n => {
-            const u = n.user || this.users[n.name] || null;
-            return {
-              ...n,
-              user: u
-            };
-          });
+          return this.nodes;
         },
 
         probeSquareColor(h) {
@@ -4794,16 +4899,12 @@
         },
 
         probeSquares(probe) {
-          const hist = (probe && probe.history && Array.isArray(probe.history)) ? probe.history : [];
+          const hist = (probe && probe.history && Array.isArray(probe.history)) ? probe.history : null;
+          if (!hist || hist.length === 0) return UNPROBED_SQUARES_10;
           const last = hist.slice(-10);
-          const pad = Math.max(0, 10 - last.length);
-          const placeholders = Array.from({ length: pad }, () => ({
-            unprobed: true,
-            ok: false,
-            latency_ms: null,
-            checked_at: null
-          }));
-          return [...placeholders, ...last];
+          const pad = 10 - last.length;
+          if (pad <= 0) return last;
+          return UNPROBED_SQUARES_10.slice(0, pad).concat(last);
         },
 
         probeSquareDotTitle(h) {
@@ -4841,11 +4942,12 @@
         },
 
         probeHistoryOf(node) {
-          const hist = node && node.probe && node.probe.history ? node.probe.history : [];
-          // show last 10, pad with nulls (grey) on the left
+          const hist = (node && node.probe && node.probe.history) ? node.probe.history : null;
+          if (!hist || hist.length === 0) return EMPTY_HIST_10;
           const last = hist.slice(-10);
-          const pad = Math.max(0, 10 - last.length);
-          return [...Array(pad).fill(null), ...last];
+          const pad = 10 - last.length;
+          if (pad <= 0) return last;
+          return EMPTY_HIST_10.slice(0, pad).concat(last);
         },
 
         probeHistoryTooltip(node) {
@@ -4951,8 +5053,13 @@
           const filterType = this.selectedType.toLowerCase();
           const blockN = this.blockFailLastN || 0;
           const hFilter = this.healthFilter || 'normal';
+          const key = `${this.nodes.length}_${query}_${filterType}_${blockN}_${hFilter}_${this._nodesVersion}`;
 
-          return this.nodesWithUsers.filter(item => {
+          if (this._filteredNodesCache && this._filteredNodesKey === key) {
+            return this._filteredNodesCache;
+          }
+
+          const res = this.nodes.filter(item => {
             // 节点状态筛选：正常 / 失效 / 全部 (默认：正常)
             if (hFilter === 'normal' && !this.isNodeHealthy(item)) return false;
             if (hFilter === 'failed' && this.isNodeHealthy(item)) return false;
@@ -4985,6 +5092,10 @@
                    type.includes(query) ||
                    username.includes(query);
           });
+
+          this._filteredNodesCache = res;
+          this._filteredNodesKey = key;
+          return res;
         },
 
         get totalPages() {
@@ -4993,28 +5104,43 @@
 
         get filteredRegions() {
           const q = this.regionSearch.trim().toLowerCase();
-          if (!q) return this.regions;
-          return this.regions.filter(r =>
-            r.code.toLowerCase().includes(q) ||
-            (this.countryNameOf(r.code) && this.countryNameOf(r.code).toLowerCase().includes(q)) ||
-            (Array.isArray(r.nodes) && r.nodes.some(n => n.toLowerCase().includes(q)))
-          );
+          const key = `${this.regions.length}_${q}_${this._regionsVersion}`;
+          if (this._filteredRegionsCache && this._filteredRegionsKey === key) {
+            return this._filteredRegionsCache;
+          }
+          let res;
+          if (!q) {
+            res = this.regions;
+          } else {
+            res = this.regions.filter(r =>
+              r.code.toLowerCase().includes(q) ||
+              (this.countryNameOf(r.code) && this.countryNameOf(r.code).toLowerCase().includes(q)) ||
+              (Array.isArray(r.nodes) && r.nodes.some(n => n.toLowerCase().includes(q)))
+            );
+          }
+          this._filteredRegionsCache = res;
+          this._filteredRegionsKey = key;
+          return res;
         },
 
         get regionTotalNodes() {
           return this.regions.reduce((s, r) => s + r.node_count, 0);
         },
 
-        async switchToNodes() {
+        async switchToNodes(force = false) {
           this.activeView = 'nodes';
-          if (this.nodes.length === 0) await this.fetchData();
+          if (!this.loadedViews.nodes || force) {
+            await this.fetchData();
+          }
           this.fetchHealth(true);
           this.$nextTick(() => lucide.createIcons());
         },
 
-        async switchToRegions() {
+        async switchToRegions(force = false) {
           this.activeView = 'regions';
-          if (this.regions.length === 0) await this.fetchRegions();
+          if (!this.loadedViews.regions || force) {
+            await this.fetchRegions();
+          }
           this.$nextTick(() => lucide.createIcons());
         },
 
@@ -5030,6 +5156,8 @@
                 probe: r.probe || null,
                 probe_fb: r.probe_fb || null
               }));
+              this.loadedViews.regions = true;
+              this._regionsVersion++;
             } else {
               this.showToast('地区分组加载失败: ' + await res.text(), 'error');
             }
@@ -5040,28 +5168,17 @@
         },
 
         countryNameOf(code) {
-          const map = {
-            'AE': '阿联酋', 'AM': '亚美尼亚', 'AR': '阿根廷', 'AU': '澳大利亚', 'AZ': '阿塞拜疆',
-            'BD': '孟加拉', 'BG': '保加利亚', 'BR': '巴西', 'CA': '加拿大', 'CH': '瑞士',
-            'CL': '智利', 'CO': '哥伦比亚', 'CZ': '捷克', 'DE': '德国', 'ES': '西班牙',
-            'FI': '芬兰', 'FR': '法国', 'GB': '英国', 'GE': '格鲁吉亚', 'HK': '香港',
-            'ID': '印尼', 'IE': '爱尔兰', 'IL': '以色列', 'IN': '印度', 'IS': '冰岛',
-            'IT': '意大利', 'JP': '日本', 'KR': '韩国', 'KZ': '哈萨克斯坦', 'LT': '立陶宛',
-            'LU': '卢森堡', 'LV': '拉脱维亚', 'MD': '摩尔多瓦', 'MO': '澳门', 'MX': '墨西哥',
-            'MY': '马来西亚', 'NG': '尼日利亚', 'NL': '荷兰', 'NO': '挪威', 'NZ': '新西兰',
-            'PH': '菲律宾', 'PK': '巴基斯坦', 'PL': '波兰', 'RO': '罗马尼亚', 'RS': '塞尔维亚',
-            'RU': '俄罗斯', 'SE': '瑞典', 'SG': '新加坡', 'TH': '泰国', 'TR': '土耳其',
-            'TW': '台湾', 'UA': '乌克兰', 'US': '美国', 'VN': '越南', 'ZA': '南非'
-          };
-          return map[(code || '').toUpperCase()] || '';
+          return COUNTRY_MAP[(code || '').toUpperCase()] || '';
         },
 
         regionHistoryOf(rg, strategy) {
           const probe = (strategy === 'fallback') ? (rg.probe_fb || null) : (rg.probe || null);
-          const hist = probe && probe.history ? probe.history : [];
+          const hist = (probe && probe.history) ? probe.history : null;
+          if (!hist || hist.length === 0) return EMPTY_HIST_10;
           const last = hist.slice(-10);
-          const pad = Math.max(0, 10 - last.length);
-          return [...Array(pad).fill(null), ...last];
+          const pad = 10 - last.length;
+          if (pad <= 0) return last;
+          return EMPTY_HIST_10.slice(0, pad).concat(last);
         },
 
         regionHistoryTooltip(rg, strategy) {
@@ -5081,6 +5198,7 @@
             if (res.ok) {
               const json = await res.json();
               if (isFb) rg.probe_fb = json.data; else rg.probe = json.data;
+              this._regionsVersion++;
               const p = json.data || {};
               const lat = p.latency_ms ? ` (${p.latency_ms}ms)` : '';
               const ip = p.outbound_ip ? ` IP: ${p.outbound_ip}` : '';
@@ -5131,13 +5249,24 @@
 
         get filteredIpGroups() {
           const q = this.ipSearch.trim().toLowerCase();
-          if (!q) return this.ipGroups;
-          return this.ipGroups.filter(g =>
-            g.ip.toLowerCase().includes(q) ||
-            g.sanitized_ip.toLowerCase().includes(q) ||
-            (g.location && g.location.toLowerCase().includes(q)) ||
-            (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
-          );
+          const key = `${this.ipGroups.length}_${q}_${this._ipGroupsVersion}`;
+          if (this._filteredIpGroupsCache && this._filteredIpGroupsKey === key) {
+            return this._filteredIpGroupsCache;
+          }
+          let res;
+          if (!q) {
+            res = this.ipGroups;
+          } else {
+            res = this.ipGroups.filter(g =>
+              g.ip.toLowerCase().includes(q) ||
+              g.sanitized_ip.toLowerCase().includes(q) ||
+              (g.location && g.location.toLowerCase().includes(q)) ||
+              (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
+            );
+          }
+          this._filteredIpGroupsCache = res;
+          this._filteredIpGroupsKey = key;
+          return res;
         },
 
         get totalIpPages() {
@@ -5164,9 +5293,11 @@
           return this.ipGroups.reduce((s, g) => s + g.node_count, 0);
         },
 
-        async switchToIpGroups() {
+        async switchToIpGroups(force = false) {
           this.activeView = 'ip_groups';
-          if (this.ipGroups.length === 0) await this.fetchIpGroups();
+          if (!this.loadedViews.ip_groups || force) {
+            await this.fetchIpGroups();
+          }
           this.$nextTick(() => lucide.createIcons());
         },
 
@@ -5182,6 +5313,8 @@
                 probe: g.probe || null,
                 probe_fb: g.probe_fb || null
               }));
+              this.loadedViews.ip_groups = true;
+              this._ipGroupsVersion++;
             } else {
               this.showToast('IP 分组加载失败: ' + await res.text(), 'error');
             }
@@ -5193,10 +5326,12 @@
 
         ipHistoryOf(ig, strategy) {
           const probe = (strategy === 'fallback') ? (ig.probe_fb || null) : (ig.probe || null);
-          const hist = probe && probe.history ? probe.history : [];
+          const hist = (probe && probe.history) ? probe.history : null;
+          if (!hist || hist.length === 0) return EMPTY_HIST_10;
           const last = hist.slice(-10);
-          const pad = Math.max(0, 10 - last.length);
-          return [...Array(pad).fill(null), ...last];
+          const pad = 10 - last.length;
+          if (pad <= 0) return last;
+          return EMPTY_HIST_10.slice(0, pad).concat(last);
         },
 
         ipHistoryTooltip(ig, strategy) {
@@ -5216,6 +5351,7 @@
             if (res.ok) {
               const json = await res.json();
               if (isFb) ig.probe_fb = json.data; else ig.probe = json.data;
+              this._ipGroupsVersion++;
               const p = json.data || {};
               const lat = p.latency_ms ? ` (${p.latency_ms}ms)` : '';
               const ip = p.outbound_ip ? ` IP: ${p.outbound_ip}` : '';
@@ -5266,23 +5402,36 @@
 
         get filteredLevelGroups() {
           const q = this.levelSearch.trim().toLowerCase();
-          if (!q) return this.levelGroups;
-          return this.levelGroups.filter(g =>
-            g.code.toLowerCase().includes(q) ||
-            g.name.toLowerCase().includes(q) ||
-            g.desc.toLowerCase().includes(q) ||
-            g.tag.toLowerCase().includes(q) ||
-            (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
-          );
+          const key = `${this.levelGroups.length}_${q}_${this._levelGroupsVersion}`;
+          if (this._filteredLevelGroupsCache && this._filteredLevelGroupsKey === key) {
+            return this._filteredLevelGroupsCache;
+          }
+          let res;
+          if (!q) {
+            res = this.levelGroups;
+          } else {
+            res = this.levelGroups.filter(g =>
+              g.code.toLowerCase().includes(q) ||
+              g.name.toLowerCase().includes(q) ||
+              g.desc.toLowerCase().includes(q) ||
+              g.tag.toLowerCase().includes(q) ||
+              (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
+            );
+          }
+          this._filteredLevelGroupsCache = res;
+          this._filteredLevelGroupsKey = key;
+          return res;
         },
 
         get levelGroupTotalNodes() {
           return this.levelGroups.reduce((s, g) => s + g.node_count, 0);
         },
 
-        async switchToLevelGroups() {
+        async switchToLevelGroups(force = false) {
           this.activeView = 'level_groups';
-          if (this.levelGroups.length === 0) await this.fetchLevelGroups();
+          if (!this.loadedViews.level_groups || force) {
+            await this.fetchLevelGroups();
+          }
           this.$nextTick(() => lucide.createIcons());
         },
 
@@ -5298,6 +5447,8 @@
                 probe: g.probe || null,
                 probe_fb: g.probe_fb || null
               }));
+              this.loadedViews.level_groups = true;
+              this._levelGroupsVersion++;
             } else {
               this.showToast('分级分组加载失败: ' + await res.text(), 'error');
             }
@@ -5315,6 +5466,7 @@
             if (res.ok) {
               const json = await res.json();
               if (isFb) lg.probe_fb = json.data; else lg.probe = json.data;
+              this._levelGroupsVersion++;
               const p = json.data || {};
               const lat = p.latency_ms ? ` (${p.latency_ms}ms)` : '';
               const ip = p.outbound_ip ? ` IP: ${p.outbound_ip}` : '';
@@ -5366,23 +5518,36 @@
 
         get filteredSpeedGroups() {
           const q = this.speedSearch.trim().toLowerCase();
-          if (!q) return this.speedGroups;
-          return this.speedGroups.filter(g =>
-            g.code.toLowerCase().includes(q) ||
-            g.name.toLowerCase().includes(q) ||
-            g.desc.toLowerCase().includes(q) ||
-            g.tag.toLowerCase().includes(q) ||
-            (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
-          );
+          const key = `${this.speedGroups.length}_${q}_${this._speedGroupsVersion}`;
+          if (this._filteredSpeedGroupsCache && this._filteredSpeedGroupsKey === key) {
+            return this._filteredSpeedGroupsCache;
+          }
+          let res;
+          if (!q) {
+            res = this.speedGroups;
+          } else {
+            res = this.speedGroups.filter(g =>
+              g.code.toLowerCase().includes(q) ||
+              g.name.toLowerCase().includes(q) ||
+              g.desc.toLowerCase().includes(q) ||
+              g.tag.toLowerCase().includes(q) ||
+              (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
+            );
+          }
+          this._filteredSpeedGroupsCache = res;
+          this._filteredSpeedGroupsKey = key;
+          return res;
         },
 
         get speedGroupTotalNodes() {
           return this.speedGroups.reduce((s, g) => s + g.node_count, 0);
         },
 
-        async switchToSpeedGroups() {
+        async switchToSpeedGroups(force = false) {
           this.activeView = 'speed_groups';
-          if (this.speedGroups.length === 0) await this.fetchSpeedGroups();
+          if (!this.loadedViews.speed_groups || force) {
+            await this.fetchSpeedGroups();
+          }
           this.$nextTick(() => lucide.createIcons());
         },
 
@@ -5398,6 +5563,8 @@
                 probe: g.probe || null,
                 probe_fb: g.probe_fb || null
               }));
+              this.loadedViews.speed_groups = true;
+              this._speedGroupsVersion++;
             } else {
               this.showToast('速度分组加载失败: ' + await res.text(), 'error');
             }
@@ -5415,6 +5582,7 @@
             if (res.ok) {
               const json = await res.json();
               if (isFb) sg.probe_fb = json.data; else sg.probe = json.data;
+              this._speedGroupsVersion++;
               const p = json.data || {};
               const spd = p.speed_formatted ? ` ⚡ ${p.speed_formatted}` : '';
               const lat = p.latency_ms ? ` (${p.latency_ms}ms)` : '';
@@ -5467,24 +5635,37 @@
 
         get filteredInheritedGroups() {
           const q = this.inheritedSearch.trim().toLowerCase();
-          if (!q) return this.inheritedGroups;
-          return this.inheritedGroups.filter(g =>
-            g.name.toLowerCase().includes(q) ||
-            g.username.toLowerCase().includes(q) ||
-            g.group_type.toLowerCase().includes(q) ||
-            g.strategy_desc.toLowerCase().includes(q) ||
-            (g.source_name && g.source_name.toLowerCase().includes(q)) ||
-            (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
-          );
+          const key = `${this.inheritedGroups.length}_${q}_${this._inheritedGroupsVersion}`;
+          if (this._filteredInheritedGroupsCache && this._filteredInheritedGroupsKey === key) {
+            return this._filteredInheritedGroupsCache;
+          }
+          let res;
+          if (!q) {
+            res = this.inheritedGroups;
+          } else {
+            res = this.inheritedGroups.filter(g =>
+              g.name.toLowerCase().includes(q) ||
+              g.username.toLowerCase().includes(q) ||
+              g.group_type.toLowerCase().includes(q) ||
+              g.strategy_desc.toLowerCase().includes(q) ||
+              (g.source_name && g.source_name.toLowerCase().includes(q)) ||
+              (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
+            );
+          }
+          this._filteredInheritedGroupsCache = res;
+          this._filteredInheritedGroupsKey = key;
+          return res;
         },
 
         get inheritedGroupTotalNodes() {
           return this.inheritedGroups.reduce((s, g) => s + g.node_count, 0);
         },
 
-        async switchToInheritedGroups() {
+        async switchToInheritedGroups(force = false) {
           this.activeView = 'inherited_groups';
-          if (this.inheritedGroups.length === 0) await this.fetchInheritedGroups();
+          if (!this.loadedViews.inherited_groups || force) {
+            await this.fetchInheritedGroups();
+          }
           this.$nextTick(() => lucide.createIcons());
         },
 
@@ -5498,6 +5679,8 @@
                 probing: false,
                 probe: g.probe || null
               }));
+              this.loadedViews.inherited_groups = true;
+              this._inheritedGroupsVersion++;
             } else {
               this.showToast('继承分组加载失败: ' + await res.text(), 'error');
             }
@@ -5514,6 +5697,7 @@
             if (res.ok) {
               const json = await res.json();
               ig.probe = json.data;
+              this._inheritedGroupsVersion++;
               const p = json.data || {};
               const spd = p.speed_formatted ? ` ⚡ ${p.speed_formatted}` : '';
               const lat = p.latency_ms ? ` (${p.latency_ms}ms)` : '';
@@ -5727,6 +5911,7 @@
               this._cachedNormalCount = null;
               this._cachedFailedCount = null;
               this.updateHealthCounts();
+              this.invalidateNodesCache();
               const latencyText = node.probe && node.probe.latency_ms ? ` (${node.probe.latency_ms}ms)` : '';
               const ipText = node.probe && node.probe.outbound_ip ? ` IP: ${node.probe.outbound_ip}` : '';
               const speedText = node.probe && node.probe.speed_formatted ? ` 网速: ${node.probe.speed_formatted}` : '';
@@ -5807,9 +5992,6 @@
 
         setSubMode(mode) {
           this.subMode = mode;
-          this.$nextTick(() => {
-            this.renderSubQrCode();
-          });
         },
 
         closeSubModal() {
@@ -5838,7 +6020,10 @@
         highlightYaml(code) {
           if (!code) return '';
           const lines = code.split('\n');
-          return lines.map(line => {
+          const limit = Math.min(lines.length, 3000);
+          const result = new Array(lines.length);
+          for (let i = 0; i < limit; i++) {
+            const line = lines[i];
             let codePart = line;
             let commentPart = '';
             const commentIdx = line.indexOf('#');
@@ -5862,20 +6047,29 @@
             escaped = escaped.replace(/^(\s*(?:-\s*)?)([\w\.\-]+)(\s*:)/, '$1<span class="yaml-key">$2</span>$3');
             escaped = escaped.replace(/:\s+(true|false|null|\d+(?:\.\d+)?)\s*$/g, ': <span class="yaml-val">$1</span>');
 
-            stringTokens.forEach((tok, idx) => {
-              escaped = escaped.replace('___STR_TOKEN_' + idx + '___', tok);
-            });
+            for (let s = 0; s < stringTokens.length; s++) {
+              escaped = escaped.replace('___STR_TOKEN_' + s + '___', stringTokens[s]);
+            }
 
             if (commentPart) {
               const escapedComment = commentPart.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
               escaped += '<span class="yaml-comment">' + escapedComment + '</span>';
             }
-            return escaped;
-          }).join('\n');
+            result[i] = escaped;
+          }
+          for (let i = limit; i < lines.length; i++) {
+            result[i] = lines[i].replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          }
+          return result.join('\n');
         },
 
         get highlightedConfigPreview() {
-          return this.highlightYaml(this.configPreviewText);
+          if (this._cachedConfigPreviewText === this.configPreviewText && this._cachedHighlightedConfig) {
+            return this._cachedHighlightedConfig;
+          }
+          this._cachedConfigPreviewText = this.configPreviewText;
+          this._cachedHighlightedConfig = this.highlightYaml(this.configPreviewText);
+          return this._cachedHighlightedConfig;
         },
 
         async reloadConfigPreview() {

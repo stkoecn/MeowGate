@@ -41,6 +41,44 @@ pub struct AppState {
     pub auth_mgr: Arc<crate::controller::auth_token::AuthManager>,
     /// Permanent subscription token that survives server restarts.
     pub permanent_sub_token: String,
+    /// In-memory cache for source content to avoid network calls & repeated disk I/O on every request.
+    pub source_content_cache: RwLock<HashMap<String, CachedSourceContent>>,
+    /// In-memory cache for base configuration YAML & pre-parsed YAML documents.
+    pub base_info_cache: RwLock<Option<CachedBaseConfig>>,
+    /// Pre-serialized YAML proxies block to avoid re-serializing 1000+ nodes on every render.
+    pub cached_proxies_yaml: RwLock<Option<CachedProxies>>,
+}
+
+/// In-memory cache for downloaded or read source content (URLs / files).
+#[derive(Clone, Debug)]
+pub struct CachedSourceContent {
+    pub fetched_at: std::time::Instant,
+    pub mtime: Option<std::time::SystemTime>,
+    pub content: String,
+}
+
+/// In-memory cache for parsed base configuration documents and raw YAML.
+#[derive(Clone, Default)]
+pub struct BaseConfigInfo {
+    #[allow(dead_code)]
+    pub combined_yaml: Option<String>,
+    pub parsed_docs: Arc<Vec<(Option<String>, Vec<serde_yaml::Mapping>)>>,
+    pub flat_docs: Arc<Vec<serde_yaml::Mapping>>,
+}
+
+#[derive(Clone)]
+pub struct CachedBaseConfig {
+    pub sources_key: Vec<(String, String)>,
+    pub contents_hash: u64,
+    pub info: BaseConfigInfo,
+}
+
+#[derive(Clone)]
+pub struct CachedProxies {
+    pub len: usize,
+    pub first: Option<String>,
+    pub last: Option<String>,
+    pub yaml: String,
 }
 
 /// Cached `/api/status` profile scan: when it ran + what it found.
@@ -113,6 +151,9 @@ impl AppState {
             is_probing: std::sync::atomic::AtomicBool::new(false),
             auth_mgr,
             permanent_sub_token,
+            source_content_cache: RwLock::new(HashMap::new()),
+            base_info_cache: RwLock::new(None),
+            cached_proxies_yaml: RwLock::new(None),
         });
 
         // Initialize default sources if database is empty
@@ -422,6 +463,7 @@ impl AppState {
             ts.retain(|k, _| node_set.contains(k));
         }
         if force_refresh_creds {
+            self.invalidate_source_caches().await;
             crate::controller::prober::clear_prober_cache();
         }
         // Health registry: seed new nodes, drop removed ones, prune persisted rows
@@ -439,14 +481,90 @@ impl AppState {
             *u_lock = users;
         }
 
+        // Cache serialized proxies YAML to avoid re-serializing 1000+ nodes on every render
+        {
+            let n_lock = self.nodes.read().await;
+            let _ = self.get_cached_or_serialize_proxies(&n_lock).await;
+        }
+
+        // Invalidate base cache so any base source changes are picked up
+        self.invalidate_base_cache().await;
+
         Ok(node_count)
     }
 
+    /// Invalidates all cached source content and base configuration documents.
+    pub async fn invalidate_source_caches(&self) {
+        let mut s = self.source_content_cache.write().await;
+        s.clear();
+        let mut b = self.base_info_cache.write().await;
+        *b = None;
+    }
+
+    /// Invalidates cached base configuration documents.
+    pub async fn invalidate_base_cache(&self) {
+        let mut b = self.base_info_cache.write().await;
+        *b = None;
+    }
+
+    /// Invalidates pre-serialized proxies YAML string.
+    #[allow(dead_code)]
+    pub async fn invalidate_proxies_cache(&self) {
+        let mut p = self.cached_proxies_yaml.write().await;
+        *p = None;
+    }
+
+    /// Returns cached proxies YAML if node count and first/last node names match,
+    /// otherwise serializes proxies and caches the result.
+    pub async fn get_cached_or_serialize_proxies(&self, nodes: &[Node]) -> Option<String> {
+        let first = nodes.first().map(|n| n.name.clone());
+        let last = nodes.last().map(|n| n.name.clone());
+        {
+            let cache = self.cached_proxies_yaml.read().await;
+            if let Some(ref c) = *cache {
+                if c.len == nodes.len() && c.first == first && c.last == last {
+                    return Some(c.yaml.clone());
+                }
+            }
+        }
+        let serialized = TemplateRenderer::serialize_proxies(nodes).ok()?;
+        let mut write = self.cached_proxies_yaml.write().await;
+        *write = Some(CachedProxies {
+            len: nodes.len(),
+            first,
+            last,
+            yaml: serialized.clone(),
+        });
+        Some(serialized)
+    }
+
     /// Reads or downloads content from a local file path or remote HTTP/HTTPS subscription URL.
-    /// Remote URLs are cached to `cache/sub_<hash>.yaml` for offline availability.
+    /// Remote URLs are cached to memory (5min TTL) and `cache/sub_<hash>.yaml` for offline availability.
+    /// Local files are cached to memory with filesystem mtime validation.
     pub async fn fetch_or_read_source_content(&self, target: &str) -> Option<String> {
+        self.fetch_or_read_source_content_cached(target, false).await
+    }
+
+    /// Reads or downloads content, optionally bypassing memory cache.
+    pub async fn fetch_or_read_source_content_cached(&self, target: &str, force_refresh: bool) -> Option<String> {
         let trimmed = target.trim();
-        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let is_remote = trimmed.starts_with("http://") || trimmed.starts_with("https://");
+        let ttl = std::time::Duration::from_secs(300); // 5 minutes memory TTL for remote URLs
+
+        if is_remote && !force_refresh {
+            let cache = self.source_content_cache.read().await;
+            if let Some(entry) = cache.get(trimmed) {
+                if entry.fetched_at.elapsed() < ttl {
+                    return Some(entry.content.clone());
+                }
+            }
+        }
+
+        if is_remote {
             let cache_dir = std::path::Path::new("cache");
             let _ = std::fs::create_dir_all(cache_dir);
             use std::hash::{Hash, Hasher};
@@ -471,6 +589,15 @@ impl AppState {
                     if let Ok(text) = resp.text().await {
                         if !text.is_empty() {
                             let _ = std::fs::write(&cache_path, &text);
+                            let mut cache = self.source_content_cache.write().await;
+                            cache.insert(
+                                trimmed.to_string(),
+                                CachedSourceContent {
+                                    fetched_at: std::time::Instant::now(),
+                                    mtime: None,
+                                    content: text.clone(),
+                                },
+                            );
                             return Some(text);
                         }
                     }
@@ -486,6 +613,15 @@ impl AppState {
             if cache_path.exists() {
                 if let Ok(cached) = std::fs::read_to_string(&cache_path) {
                     tracing::info!("Using cached remote subscription for '{}'", trimmed);
+                    let mut cache = self.source_content_cache.write().await;
+                    cache.insert(
+                        trimmed.to_string(),
+                        CachedSourceContent {
+                            fetched_at: std::time::Instant::now(),
+                            mtime: None,
+                            content: cached.clone(),
+                        },
+                    );
                     return Some(cached);
                 }
             }
@@ -494,45 +630,136 @@ impl AppState {
         } else {
             let path = std::path::Path::new(trimmed);
             if path.exists() && path.is_file() {
-                std::fs::read_to_string(path).ok()
+                let mtime = path.metadata().and_then(|m| m.modified()).ok();
+                if !force_refresh {
+                    let cache = self.source_content_cache.read().await;
+                    if let Some(entry) = cache.get(trimmed) {
+                        if entry.mtime == mtime && mtime.is_some() {
+                            return Some(entry.content.clone());
+                        }
+                    }
+                }
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    let mut cache = self.source_content_cache.write().await;
+                    cache.insert(
+                        trimmed.to_string(),
+                        CachedSourceContent {
+                            fetched_at: std::time::Instant::now(),
+                            mtime,
+                            content: content.clone(),
+                        },
+                    );
+                    Some(content)
+                } else {
+                    None
+                }
             } else {
                 None
             }
         }
     }
 
-    /// Retrieves the effective base configuration string.
-    /// Priority:
-    /// 1. Any enabled source with `is_base: true` (reads from file path or URL)
-    /// 2. If none, falls back to config.meow.base_config_path
-    pub async fn get_effective_base_config(&self) -> Option<String> {
+    /// Retrieves effective base configuration info (cached in memory with change detection).
+    /// Provides combined raw YAML string, per-source parsed mappings, and flattened mappings.
+    pub async fn get_effective_base_info(&self) -> BaseConfigInfo {
         let sources = self.db.get_all_sources().await.unwrap_or_default();
-        let mut combined_bases = Vec::new();
+        let mut base_sources = Vec::new();
         for s in sources {
             if s.enabled && s.is_base {
-                if let Some(content) = self.fetch_or_read_source_content(&s.target).await {
-                    combined_bases.push(content);
+                base_sources.push((s.id, s.name, s.target));
+            }
+        }
+
+        let mut sources_key = Vec::new();
+        let mut raw_contents = Vec::new();
+        let mut parsed_docs = Vec::new();
+        let mut flat_docs = Vec::new();
+        let mut combined_bases = Vec::new();
+
+        if !base_sources.is_empty() {
+            for (id, name, target) in base_sources {
+                sources_key.push((id, target.clone()));
+                if let Some(content) = self.fetch_or_read_source_content(&target).await {
+                    raw_contents.push((Some(name), content));
+                }
+            }
+        } else if let Some(path) = &self.config.meow.base_config_path {
+            if path.exists() {
+                let target = path.to_string_lossy().to_string();
+                sources_key.push(("default_base_path".to_string(), target.clone()));
+                if let Some(content) = self.fetch_or_read_source_content(&target).await {
+                    let file_name = path.file_name().and_then(|f| f.to_str()).map(|s| s.to_string());
+                    raw_contents.push((file_name, content));
                 }
             }
         }
 
-        if !combined_bases.is_empty() {
-            return Some(combined_bases.join("\n---\n"));
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for (_, c) in &raw_contents {
+            c.hash(&mut hasher);
         }
+        let contents_hash = hasher.finish();
 
-        if let Some(path) = &self.config.meow.base_config_path {
-            if path.exists() {
-                return std::fs::read_to_string(path).ok();
+        // Check if cache matches sources_key and contents_hash
+        {
+            let cache = self.base_info_cache.read().await;
+            if let Some(ref c) = *cache {
+                if c.sources_key == sources_key && c.contents_hash == contents_hash {
+                    return c.info.clone();
+                }
             }
         }
-        None
+
+        // Cache miss: parse documents
+        for (source_name, content) in raw_contents {
+            let docs = TemplateRenderer::parse_base_docs(Some(&content));
+            for doc in &docs {
+                flat_docs.push(doc.clone());
+            }
+            parsed_docs.push((source_name, docs));
+            combined_bases.push(content);
+        }
+
+        let combined_yaml = if !combined_bases.is_empty() {
+            Some(combined_bases.join("\n---\n"))
+        } else {
+            None
+        };
+
+        let info = BaseConfigInfo {
+            combined_yaml,
+            parsed_docs: Arc::new(parsed_docs),
+            flat_docs: Arc::new(flat_docs),
+        };
+
+        {
+            let mut cache = self.base_info_cache.write().await;
+            *cache = Some(CachedBaseConfig {
+                sources_key,
+                contents_hash,
+                info: info.clone(),
+            });
+        }
+
+        info
+    }
+
+    /// Retrieves the effective base configuration string.
+    /// Priority:
+    /// 1. Any enabled source with `is_base: true` (reads from file path or URL)
+    /// 2. If none, falls back to config.meow.base_config_path
+    #[allow(dead_code)]
+    pub async fn get_effective_base_config(&self) -> Option<String> {
+        self.get_effective_base_info().await.combined_yaml
     }
 
     /// Generates YAML config content (includes region auto/failover groups)
     pub async fn generate_config(&self) -> Result<String> {
-        let nodes = self.nodes.read().await.clone();
-        let users = self.users.read().await.clone();
-        let probes = self.probe_results.read().await.clone();
+        let nodes = self.nodes.read().await;
+        let users = self.users.read().await;
+        let probes = self.probe_results.read().await;
+        let traffic = self.traffic_stats.read().await;
         let unavailable = self.health.unavailable().await;
 
         let region_groups = crate::generator::groups::build_region_groups_filtered(
@@ -550,14 +777,29 @@ impl AppState {
             &probes,
             &unavailable,
         );
-        let speed_groups = self.list_speed_groups().await;
-        let inherited_groups = self.list_inherited_groups().await;
-
-        let base_config = self.get_effective_base_config().await;
-
-        TemplateRenderer::render_with_all_groups_cached(
+        let speed_groups = crate::generator::speed_groups::build_speed_groups_filtered(
             &nodes,
-            None,
+            &probes,
+            &traffic,
+            &unavailable,
+        );
+
+        let base_info = self.get_effective_base_info().await;
+        let mut inherited_groups = Vec::new();
+        for (source_name, docs) in base_info.parsed_docs.iter() {
+            let groups = crate::generator::inherited_groups::extract_inherited_groups_from_docs(
+                docs,
+                &unavailable,
+                source_name.as_deref(),
+            );
+            inherited_groups.extend(groups);
+        }
+
+        let cached_proxies = self.get_cached_or_serialize_proxies(&nodes).await;
+
+        TemplateRenderer::render_with_all_groups_cached_docs(
+            &nodes,
+            cached_proxies.as_deref(),
             &users,
             &region_groups,
             &ip_groups,
@@ -565,7 +807,7 @@ impl AppState {
             &speed_groups,
             &inherited_groups,
             &unavailable,
-            base_config.as_deref(),
+            &base_info.flat_docs,
             self.config.meow.mixed_port,
             &self.config.meow.default_target,
         )
@@ -579,8 +821,86 @@ impl AppState {
 
     /// Generates Clash client subscription YAML, optionally filtering proxies to healthy nodes only
     pub async fn generate_clash_subscription_with_filter(&self, healthy_only: bool) -> Result<String> {
+        let unavailable = self.health.unavailable().await;
+        let nodes_lock = self.nodes.read().await;
+        let probes = self.probe_results.read().await;
+        let traffic = self.traffic_stats.read().await;
+
+        let is_filtered = healthy_only && !unavailable.is_empty();
+        let filtered_nodes: Vec<Node>;
+        let nodes_slice: &[Node] = if is_filtered {
+            filtered_nodes = nodes_lock
+                .iter()
+                .filter(|n| !unavailable.contains(&n.name))
+                .cloned()
+                .collect();
+            &filtered_nodes
+        } else {
+            &nodes_lock
+        };
+
+        let region_groups = crate::generator::groups::build_region_groups_filtered(
+            nodes_slice,
+            &probes,
+            &unavailable,
+        );
+        let ip_groups = crate::generator::ip_groups::build_ip_groups_filtered(
+            nodes_slice,
+            &probes,
+            &unavailable,
+        );
+        let level_groups = crate::generator::level_groups::build_level_groups_filtered(
+            nodes_slice,
+            &probes,
+            &unavailable,
+        );
+        let speed_groups = crate::generator::speed_groups::build_speed_groups_filtered(
+            nodes_slice,
+            &probes,
+            &traffic,
+            &unavailable,
+        );
+
+        let base_info = self.get_effective_base_info().await;
+        let mut inherited_groups = Vec::new();
+        for (source_name, docs) in base_info.parsed_docs.iter() {
+            let groups = crate::generator::inherited_groups::extract_inherited_groups_from_docs(
+                docs,
+                &unavailable,
+                source_name.as_deref(),
+            );
+            inherited_groups.extend(groups);
+        }
+
+        let cached_proxies = if !is_filtered {
+            self.get_cached_or_serialize_proxies(nodes_slice).await
+        } else {
+            None
+        };
+
+        TemplateRenderer::render_clash_subscription_docs(
+            nodes_slice,
+            cached_proxies.as_deref(),
+            &region_groups,
+            &ip_groups,
+            &level_groups,
+            &speed_groups,
+            &inherited_groups,
+            &unavailable,
+            &base_info.flat_docs,
+        )
+    }
+
+    /// Generates Clash client subscription YAML routing all traffic through MeowGate's gateway port,
+    /// optionally filtering proxies to healthy nodes only.
+    pub async fn generate_clash_subscription_gateway_with_filter(
+        &self,
+        gateway_host: &str,
+        healthy_only: bool,
+    ) -> Result<String> {
         let mut nodes = self.nodes.read().await.clone();
         let probes = self.probe_results.read().await.clone();
+        let traffic = self.traffic_stats.read().await.clone();
         let unavailable = self.health.unavailable().await;
 
         if healthy_only {
@@ -602,24 +922,41 @@ impl AppState {
             &probes,
             &unavailable,
         );
-        let speed_groups = self.list_speed_groups().await;
-        let inherited_groups = self.list_inherited_groups().await;
-
-        let base_config = self.get_effective_base_config().await;
-
-        TemplateRenderer::render_clash_subscription(
+        let speed_groups = crate::generator::speed_groups::build_speed_groups_filtered(
             &nodes,
-            None,
+            &probes,
+            &traffic,
+            &unavailable,
+        );
+
+        let base_info = self.get_effective_base_info().await;
+        let mut inherited_groups = Vec::new();
+        for (source_name, docs) in base_info.parsed_docs.iter() {
+            let groups = crate::generator::inherited_groups::extract_inherited_groups_from_docs(
+                docs,
+                &unavailable,
+                source_name.as_deref(),
+            );
+            inherited_groups.extend(groups);
+        }
+
+        let users = self.users.read().await.clone();
+        let gateway_port = self.config.meow.gateway_port;
+
+        TemplateRenderer::render_clash_subscription_gateway_docs(
+            gateway_host,
+            gateway_port,
+            &nodes,
+            &users,
             &region_groups,
             &ip_groups,
             &level_groups,
             &speed_groups,
             &inherited_groups,
             &unavailable,
-            base_config.as_deref(),
+            &base_info.flat_docs,
         )
     }
-
 
     /// Current region grouping (for the Web UI regions page)
     pub async fn list_regions(&self) -> Vec<crate::generator::groups::RegionGroup> {
@@ -656,39 +993,22 @@ impl AppState {
 
     /// Current inherited custom groups parsed from base config sources (where is_base is true)
     pub async fn list_inherited_groups(&self) -> Vec<crate::generator::inherited_groups::InheritedGroup> {
-        let sources = self.db.get_all_sources().await.unwrap_or_default();
         let unavailable = self.health.unavailable().await;
+        self.list_inherited_groups_filtered(&unavailable).await
+    }
+
+    /// Current inherited custom groups filtered by unavailable node set (avoids repeated health lock)
+    pub async fn list_inherited_groups_filtered(&self, unavailable: &std::collections::HashSet<String>) -> Vec<crate::generator::inherited_groups::InheritedGroup> {
+        let base_info = self.get_effective_base_info().await;
         let mut all_groups = Vec::new();
-
-        for s in sources {
-            if s.enabled && s.is_base {
-                if let Some(content) = self.fetch_or_read_source_content(&s.target).await {
-                    let groups = crate::generator::inherited_groups::extract_inherited_groups(
-                        Some(&content),
-                        &unavailable,
-                        Some(&s.name),
-                    );
-                    all_groups.extend(groups);
-                }
-            }
+        for (source_name, docs) in base_info.parsed_docs.iter() {
+            let groups = crate::generator::inherited_groups::extract_inherited_groups_from_docs(
+                docs,
+                unavailable,
+                source_name.as_deref(),
+            );
+            all_groups.extend(groups);
         }
-
-        // Fallback to base_config_path if no source is_base was found
-        if all_groups.is_empty() {
-            if let Some(path) = &self.config.meow.base_config_path {
-                if path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(path) {
-                        let groups = crate::generator::inherited_groups::extract_inherited_groups(
-                            Some(&content),
-                            &unavailable,
-                            path.file_name().and_then(|f| f.to_str()),
-                        );
-                        all_groups.extend(groups);
-                    }
-                }
-            }
-        }
-
         all_groups
     }
 

@@ -322,7 +322,12 @@ pub async fn toggle_source_base(
     Path(id): Path<String>,
     State(state): State<SharedState>,
 ) -> Result<Json<Value>> {
+    let _ = state.db.get_source(&id).await?
+        .ok_or_else(|| crate::error::AppError::Config(format!("Source {} not found", id)))?;
     let new_is_base = state.db.toggle_source_base(&id).await?;
+
+    // Invalidate cached base info
+    state.invalidate_source_caches().await;
 
     // Auto-sync after toggling base inheritance and apply hot reload to Mihomo immediately
     let count = state.sync_nodes_and_users(false).await?;
@@ -340,9 +345,18 @@ pub async fn toggle_source_base(
 pub async fn toggle_source(
     Path(id): Path<String>,
     State(state): State<SharedState>,
-    Json(payload): Json<ToggleSourceRequest>,
+    payload: Option<Json<ToggleSourceRequest>>,
 ) -> Result<Json<Value>> {
-    state.db.toggle_source(&id, payload.enabled).await?;
+    let source = state.db.get_source(&id).await?
+        .ok_or_else(|| crate::error::AppError::Config(format!("Source {} not found", id)))?;
+
+    let new_enabled = match payload {
+        Some(Json(p)) => p.enabled,
+        None => !source.enabled,
+    };
+
+    state.db.toggle_source(&id, new_enabled).await?;
+    state.invalidate_source_caches().await;
 
     // Auto-sync after toggling and apply hot reload to Mihomo immediately
     let count = state.sync_nodes_and_users(false).await?;
@@ -351,7 +365,7 @@ pub async fn toggle_source(
 
     Ok(Json(json!({
         "success": true,
-        "message": format!("Source status updated to {}", if payload.enabled { "enabled" } else { "disabled" }),
+        "message": format!("Source status updated to {}", if new_enabled { "enabled" } else { "disabled" }),
         "total_nodes": count
     })))
 }
@@ -360,7 +374,11 @@ pub async fn delete_source(
     Path(id): Path<String>,
     State(state): State<SharedState>,
 ) -> Result<Json<Value>> {
+    let _ = state.db.get_source(&id).await?
+        .ok_or_else(|| crate::error::AppError::Config(format!("Source {} not found", id)))?;
+
     state.db.delete_source(&id).await?;
+    state.invalidate_source_caches().await;
 
     // Auto-sync after deleting and apply hot reload
     let count = state.sync_nodes_and_users(false).await?;

@@ -27,12 +27,12 @@ pub async fn get_proxy_status(
 /// Toggles or sets OS system proxy status
 pub async fn toggle_proxy(
     State(state): State<SharedState>,
-    Json(payload): Json<Option<ToggleProxyRequest>>,
+    payload: Option<Json<ToggleProxyRequest>>,
 ) -> Result<Json<Value>> {
     let port = state.config.meow.gateway_port;
     let current = get_system_proxy_status(port);
 
-    let target_enable = match payload.and_then(|p| p.enabled) {
+    let target_enable = match payload.and_then(|Json(p)| p.enabled) {
         Some(e) => e,
         None => !current.enabled,
     };

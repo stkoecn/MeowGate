@@ -51,8 +51,13 @@ pub struct AuthConfig {
     #[serde(default)]
     pub admin_password: String,
 
+    /// Optional fixed subscription token.
+    /// If empty, a permanent token is generated and persisted in SQLite.
+    #[serde(default)]
+    pub sub_token: String,
+
     /// JWT / HMAC secret for signing authentication session tokens.
-    /// If empty, a secure random key is generated on boot.
+    /// If empty, a persistent key is stored in SQLite so session tokens survive restarts.
     #[serde(default)]
     pub jwt_secret: String,
 }

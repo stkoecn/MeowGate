@@ -39,6 +39,8 @@ pub struct AppState {
     pub is_probing: std::sync::atomic::AtomicBool,
     /// JWT / HMAC session auth manager for Web UI & API authentication.
     pub auth_mgr: Arc<crate::controller::auth_token::AuthManager>,
+    /// Permanent subscription token that survives server restarts.
+    pub permanent_sub_token: String,
 }
 
 /// Cached `/api/status` profile scan: when it ran + what it found.
@@ -66,7 +68,32 @@ impl AppState {
             config.meow.api_secret.clone(),
         );
 
-        let auth_mgr = Arc::new(crate::controller::auth_token::AuthManager::new(&config.auth.jwt_secret));
+        // 1. JWT secret: use configured secret, or load/generate a persistent secret in SQLite
+        let effective_jwt_secret = if !config.auth.jwt_secret.trim().is_empty() {
+            config.auth.jwt_secret.trim().to_string()
+        } else if let Ok(Some(persisted)) = db.get_setting("auth_jwt_secret").await {
+            persisted
+        } else {
+            let mut rand_bytes = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut rand_bytes);
+            let generated = crate::controller::auth_token::hex_encode(&rand_bytes);
+            let _ = db.save_setting("auth_jwt_secret", &generated).await;
+            generated
+        };
+        let auth_mgr = Arc::new(crate::controller::auth_token::AuthManager::new(&effective_jwt_secret));
+
+        // 2. Permanent subscription token: use configured sub_token, or load/generate a persistent token in SQLite
+        let permanent_sub_token = if !config.auth.sub_token.trim().is_empty() {
+            config.auth.sub_token.trim().to_string()
+        } else if let Ok(Some(persisted)) = db.get_setting("subscription_token").await {
+            persisted
+        } else {
+            let mut rand_bytes = [0u8; 16];
+            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut rand_bytes);
+            let generated = crate::controller::auth_token::hex_encode(&rand_bytes);
+            let _ = db.save_setting("subscription_token", &generated).await;
+            generated
+        };
 
         let state = Arc::new(Self {
             config,
@@ -85,6 +112,7 @@ impl AppState {
             status_refreshing: std::sync::atomic::AtomicBool::new(false),
             is_probing: std::sync::atomic::AtomicBool::new(false),
             auth_mgr,
+            permanent_sub_token,
         });
 
         // Initialize default sources if database is empty
@@ -1011,7 +1039,11 @@ impl AppState {
         if self.config.auth.admin_password == token_or_pass {
             return true;
         }
-        // 2. Cryptographic token match
+        // 2. Exact permanent subscription token match
+        if self.permanent_sub_token == token_or_pass {
+            return true;
+        }
+        // 3. Cryptographic token match
         self.auth_mgr.verify_token(token_or_pass)
     }
 }

@@ -3800,6 +3800,10 @@
                   复制链接
                 </button>
               </div>
+              <div style="font-size: 11px; color: var(--text-dim); margin-top: 5px; display: flex; align-items: center; gap: 4px;">
+                <i data-lucide="shield-check" style="width: 12px; height: 12px; color: var(--color-success); flex-shrink: 0;"></i>
+                <span><strong>永久固定 Token：</strong>该订阅密钥已持久化锁定，服务重启、更新或网络变动均不失效，客户端一次导入永久可用。</span>
+              </div>
             </div>
 
             <!-- Quick Action Links -->
@@ -3958,7 +3962,7 @@
         showAddSource: false,
         subModalOpen: false,
         subMode: 'healthy',
-        subToken: localStorage.getItem('meow_token') || '',
+        subToken: localStorage.getItem('meow_sub_token') || localStorage.getItem('meow_token') || '',
         editSourceModalOpen: false,
         sysProxy: {
           supported: true,
@@ -5546,7 +5550,7 @@
           } else {
             params.push('filter=healthy');
           }
-          const t = (this.subToken || localStorage.getItem('meow_token') || '').trim();
+          const t = (this.subToken || localStorage.getItem('meow_sub_token') || localStorage.getItem('meow_token') || '').trim();
           if (t) {
             params.push('token=' + encodeURIComponent(t));
           }
@@ -6056,7 +6060,7 @@
               this.authEnabled = !!(json.auth_enabled ?? (json.data && json.data.auth_enabled));
               if (json.sub_token) {
                 this.subToken = json.sub_token;
-                localStorage.setItem('meow_token', json.sub_token);
+                localStorage.setItem('meow_sub_token', json.sub_token);
               }
             }
           } catch (e) {

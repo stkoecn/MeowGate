@@ -149,3 +149,43 @@ dns:
     // Cleanup
     let _ = std::fs::remove_file(&base_file);
 }
+
+#[tokio::test]
+async fn test_permanent_subscription_token_across_restarts() {
+    let temp_dir = std::env::temp_dir();
+    let db_path = temp_dir.join(format!("meowgate_test_sub_tok_{}.db", rand::random::<u64>()));
+    let db_url = format!("sqlite://{}?mode=rwc", db_path.to_string_lossy());
+
+    let mut config = AppConfig::default();
+    config.database.url = db_url.clone();
+    config.auth.admin_password = "my_admin_password_123".to_string();
+
+    // 1. First boot: generates and saves permanent_sub_token in SQLite
+    let state1 = AppState::new(config.clone()).await.expect("AppState creation 1");
+    let token1 = state1.permanent_sub_token.clone();
+    assert!(!token1.is_empty());
+    assert_eq!(token1.len(), 32); // 16 random bytes in hex
+
+    // Verify token can authorize subscription
+    assert!(state1.verify_token_or_secret(&token1));
+    assert!(state1.verify_token_or_secret("my_admin_password_123"));
+    assert!(!state1.verify_token_or_secret("wrong_token"));
+
+    // 2. Second boot (simulating service restart with same database): loads same token from SQLite
+    let state2 = AppState::new(config.clone()).await.expect("AppState creation 2");
+    let token2 = state2.permanent_sub_token.clone();
+    assert_eq!(token1, token2, "Subscription token must remain identical across restarts!");
+
+    // 3. User can also specify a custom sub_token in config.toml
+    let mut config3 = config.clone();
+    config3.auth.sub_token = "my_custom_fixed_token_abc".to_string();
+    let state3 = AppState::new(config3).await.expect("AppState creation 3");
+    assert_eq!(state3.permanent_sub_token, "my_custom_fixed_token_abc");
+    assert!(state3.verify_token_or_secret("my_custom_fixed_token_abc"));
+
+    // Cleanup
+    drop(state1);
+    drop(state2);
+    drop(state3);
+    let _ = std::fs::remove_file(&db_path);
+}

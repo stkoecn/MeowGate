@@ -31,11 +31,10 @@ pub async fn auth_status(
         extract_and_verify(&state, &headers, query.token.as_deref())
     };
 
-    // If authenticated, automatically provide a long-lived subscription token (90 days)
+    // If authenticated, automatically provide the permanent subscription token
     // so any subscription link generated for this authorized user can be directly imported into Clash/clients!
     let sub_token = if auth_enabled && authenticated {
-        let ttl_secs = 90 * 24 * 3600;
-        Some(state.auth_mgr.create_token(ttl_secs))
+        Some(state.permanent_sub_token.clone())
     } else {
         None
     };

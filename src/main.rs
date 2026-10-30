@@ -130,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/sources", get(api::sources::list_sources).post(api::sources::create_source))
         .route("/sources/scan", post(api::sources::scan_sources))
         .route("/sources/{id}/toggle", post(api::sources::toggle_source).put(api::sources::toggle_source))
+        .route("/sources/{id}/toggle-base", post(api::sources::toggle_source_base).put(api::sources::toggle_source_base))
         .route("/sources/{id}", axum::routing::delete(api::sources::delete_source).put(api::sources::update_source))
         .route("/regions", get(api::regions::list_regions))
         .route("/regions/probe", post(api::regions::probe_all_regions))

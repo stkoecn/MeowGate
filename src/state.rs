@@ -138,6 +138,7 @@ impl AppState {
                 target: self.config.clash.api_url.clone(),
                 secret: self.config.clash.api_secret.clone(),
                 enabled: false,
+                is_base: false,
                 created_at: Utc::now(),
             }).await;
         }
@@ -194,6 +195,7 @@ impl AppState {
                     target: target_str.clone(),
                     secret: None,
                     enabled: true,
+                    is_base: false,
                     created_at: Utc::now(),
                 }).await?;
 
@@ -222,10 +224,12 @@ impl AppState {
         let mut node_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut node_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        let mut add_node = |mut node: Node| {
+        let mut add_node = |mut node: Node, is_base: bool| {
             let key = node.dedup_key();
             // 1. If exact same physical node + same user credential already exists, it is a duplicate -> skip
-            if !node.server.is_empty() && node_keys.contains(&key) {
+            // Note: If the source has is_base = true (e.g. multi-channel load-balancing us1-01..us1-10 with identical server:port),
+            // we preserve each distinct channel rather than collapsing them into one!
+            if !node.server.is_empty() && node_keys.contains(&key) && !is_base {
                 return;
             }
 
@@ -254,14 +258,15 @@ impl AppState {
         };
 
         for source in &enabled_sources {
-            tracing::info!("Collecting nodes from enabled source: [{}] {} (type: {})", source.id, source.name, source.source_type);
+            let is_base = source.is_base;
+            tracing::info!("Collecting nodes from enabled source: [{}] {} (type: {}, is_base: {})", source.id, source.name, source.source_type, is_base);
             match source.source_type.as_str() {
                 "clash_api" => {
                     let client = ClashApiClient::new(&source.target, source.secret.clone());
                     match client.fetch_nodes().await {
                         Ok(api_nodes) => {
                             for node in api_nodes {
-                                add_node(node);
+                                add_node(node, is_base);
                             }
                         }
                         Err(e) => {
@@ -280,7 +285,7 @@ impl AppState {
                                     if ext_l == "yaml" || ext_l == "yml" {
                                         if let Ok(parsed) = YamlParser::parse_file(path) {
                                             for node in parsed {
-                                                add_node(node);
+                                                add_node(node, is_base);
                                             }
                                         }
                                     }
@@ -296,7 +301,7 @@ impl AppState {
                     if path.exists() && path.is_file() {
                         if let Ok(parsed) = YamlParser::parse_file(path) {
                             for node in parsed {
-                                add_node(node);
+                                add_node(node, is_base);
                             }
                         }
                     } else {
@@ -405,6 +410,37 @@ impl AppState {
         Ok(node_count)
     }
 
+    /// Retrieves the effective base configuration string.
+    /// Priority:
+    /// 1. Any enabled source with `is_base: true` (reads from file path or URL)
+    /// 2. If none, falls back to config.meow.base_config_path
+    pub async fn get_effective_base_config(&self) -> Option<String> {
+        let sources = self.db.get_all_sources().await.unwrap_or_default();
+        let mut combined_bases = Vec::new();
+        for s in sources {
+            if s.enabled && s.is_base {
+                let target = s.target.trim();
+                let path = std::path::Path::new(target);
+                if path.exists() && path.is_file() {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        combined_bases.push(content);
+                    }
+                }
+            }
+        }
+
+        if !combined_bases.is_empty() {
+            return Some(combined_bases.join("\n---\n"));
+        }
+
+        if let Some(path) = &self.config.meow.base_config_path {
+            if path.exists() {
+                return std::fs::read_to_string(path).ok();
+            }
+        }
+        None
+    }
+
     /// Generates YAML config content (includes region auto/failover groups)
     pub async fn generate_config(&self) -> Result<String> {
         let nodes = self.nodes.read().await.clone();
@@ -429,15 +465,7 @@ impl AppState {
         );
         let speed_groups = self.list_speed_groups().await;
 
-        let base_config = if let Some(path) = &self.config.meow.base_config_path {
-            if path.exists() {
-                Some(std::fs::read_to_string(path)?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let base_config = self.get_effective_base_config().await;
 
         TemplateRenderer::render_with_all_groups_cached(
             &nodes,
@@ -487,15 +515,7 @@ impl AppState {
         );
         let speed_groups = self.list_speed_groups().await;
 
-        let base_config = if let Some(path) = &self.config.meow.base_config_path {
-            if path.exists() {
-                Some(std::fs::read_to_string(path)?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let base_config = self.get_effective_base_config().await;
 
         TemplateRenderer::render_clash_subscription(
             &nodes,

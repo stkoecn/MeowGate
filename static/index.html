@@ -3216,17 +3216,18 @@
             <table class="data-table sources-table" style="width: 100%; margin: 0; border: none;">
               <thead style="position: sticky; top: 0; z-index: 5; background: var(--bg-panel); box-shadow: 0 1px 0 var(--border);">
                 <tr>
-                  <th style="width: 180px;">配置源名称</th>
-                  <th style="width: 120px;">源类型</th>
+                  <th style="width: 170px;">配置源名称</th>
+                  <th style="width: 100px;">源类型</th>
                   <th>目标地址 / 路径</th>
-                  <th style="width: 80px; text-align: center;">状态</th>
+                  <th style="width: 80px; text-align: center;">基础继承</th>
+                  <th style="width: 70px; text-align: center;">状态</th>
                   <th style="width: 70px; text-align: right;">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <template x-if="loading.fetchingSources && sources.length === 0">
                   <tr>
-                    <td colspan="5" style="text-align: center; height: 100px; color: var(--text-dim);">
+                    <td colspan="6" style="text-align: center; height: 100px; color: var(--text-dim);">
                       <i data-lucide="loader-2" style="width: 16px; height: 16px; display: inline-block;" class="spin"></i>
                       <span style="margin-left: 6px;">正在拉取配置源...</span>
                     </td>
@@ -3235,7 +3236,7 @@
 
                 <template x-if="!loading.fetchingSources && sources.length === 0">
                   <tr>
-                    <td colspan="5" style="text-align: center; height: 100px; color: var(--text-dim);">
+                    <td colspan="6" style="text-align: center; height: 100px; color: var(--text-dim);">
                       未发现配置源，请在下方表单创建新源。
                     </td>
                   </tr>
@@ -3271,6 +3272,18 @@
                           <span class="badge" title="含 API 认证密钥" style="font-size: 9px; padding: 0 4px; flex-shrink: 0;">key</span>
                         </template>
                       </div>
+                    </td>
+
+                    <!-- Base inheritance toggle switch -->
+                    <td style="text-align: center;">
+                      <label class="switch" :title="src.is_base ? '点击关闭配置继承（当前已开启，该源中的代理组与规则会自动合并至网关及对外链接）' : '点击开启继承（默认关闭；开启后将继承该配置中的代理组、分流规则等高级设定并自动合并到对外链接）'">
+                        <input 
+                          type="checkbox" 
+                          :checked="src.is_base" 
+                          :disabled="src.toggling_base"
+                          @change="toggleSourceBase(src, $event.target.checked)">
+                        <span class="switch-slider" :style="src.is_base ? 'background-color: var(--accent);' : ''"></span>
+                      </label>
                     </td>
 
                     <!-- Status toggle switch -->
@@ -3373,11 +3386,17 @@
               </div>
             </div>
 
-            <!-- Submit button row with auto-detect hint -->
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 2px;">
-              <div style="font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 4px;">
-                <i data-lucide="sparkles" style="width: 12px; height: 12px; color: var(--accent);"></i>
-                <span>配置名称将自动识别/生成，同路径文件自动判重</span>
+            <!-- Submit button row with auto-detect hint & is_base checkbox -->
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 2px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 4px;">
+                  <i data-lucide="sparkles" style="width: 12px; height: 12px; color: var(--accent);"></i>
+                  <span>配置名称自动识别，同路径文件自动判重</span>
+                </div>
+                <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; cursor: pointer; color: var(--text); user-select: none;" title="开启后将继承此配置源中的代理组、分流规则并自动合并到对外链接">
+                  <input type="checkbox" x-model="newSource.is_base" style="cursor: pointer;">
+                  <span>开启配置继承 (默认关闭)</span>
+                </label>
               </div>
               <button 
                 type="submit" 
@@ -3499,6 +3518,13 @@
               class="input-compact font-mono" 
               style="width: 100%; height: 30px;">
             <span class="text-dim font-mono" style="font-size: 10px; margin-top: 3px; display: block;">Clash / Mihomo 控制器 API 鉴权密钥，本地配置文件无需填写</span>
+          </div>
+
+          <div style="padding-top: 4px; border-top: 1px solid var(--border);">
+            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; cursor: pointer; color: var(--text);">
+              <input type="checkbox" x-model="editingSource.is_base" style="cursor: pointer;">
+              <span>开启配置继承 (Base Config，继承该源中的代理组与分流规则并自动合并到对外链接)</span>
+            </label>
           </div>
         </div>
 
@@ -3944,7 +3970,8 @@
           name: '',
           target: '',
           secret: '',
-          source_type: 'clash_file'
+          source_type: 'clash_file',
+          is_base: false
         },
         healthModalOpen: false,
         healthSearch: '',
@@ -3976,7 +4003,8 @@
           name: '',
           source_type: 'clash_api',
           target: '',
-          secret: ''
+          secret: '',
+          is_base: false
         },
         users: {},
         searchQuery: '',
@@ -5842,13 +5870,45 @@
           }
         },
 
+        async toggleSourceBase(src, is_base) {
+          src.toggling_base = true;
+          const oldVal = src.is_base;
+          src.is_base = is_base; // optimistic update
+          try {
+            const res = await fetch(`/api/sources/${encodeURIComponent(src.id)}/toggle-base`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ is_base })
+            });
+            if (res.ok) {
+              const json = await res.json();
+              src.is_base = json.is_base;
+              const statusText = src.is_base ? '已开启配置继承（已将该源的策略组与分流规则合并到对外链接）' : '已关闭配置继承';
+              this.showToast(`配置源 [${src.name}] ${statusText}`, 'success');
+              await this.fetchSources();
+              await this.fetchData();
+            } else {
+              src.is_base = oldVal;
+              const err = await res.text();
+              this.showToast('切换继承状态失败: ' + err, 'error');
+            }
+          } catch (e) {
+            src.is_base = oldVal;
+            this.showToast('网络错误: ' + e.message, 'error');
+          } finally {
+            src.toggling_base = false;
+            this.$nextTick(() => lucide.createIcons());
+          }
+        },
+
         openEditSourceModal(src) {
           this.editingSource = {
             id: src.id,
             name: src.name,
             target: src.target,
             secret: src.secret || '',
-            source_type: src.source_type
+            source_type: src.source_type,
+            is_base: !!src.is_base
           };
           this.editSourceModalOpen = true;
           this.$nextTick(() => window.refreshIcons());
@@ -5874,7 +5934,8 @@
               body: JSON.stringify({
                 name,
                 target,
-                secret: this.editingSource.secret ? this.editingSource.secret.trim() : ''
+                secret: this.editingSource.secret ? this.editingSource.secret.trim() : '',
+                is_base: !!this.editingSource.is_base
               })
             });
             if (res.ok) {
@@ -6009,7 +6070,8 @@
               source_type: sourceType,
               target,
               secret: this.newSource.secret.trim() || null,
-              enabled: true
+              enabled: true,
+              is_base: !!this.newSource.is_base
             };
 
             const res = await fetch('/api/sources', {
@@ -6031,6 +6093,7 @@
               this.newSource.target = '';
               this.newSource.secret = '';
               this.newSource.source_type = 'clash_file';
+              this.newSource.is_base = false;
 
               // Refresh sources and nodes
               await this.fetchSources();

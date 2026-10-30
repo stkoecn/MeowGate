@@ -19,6 +19,8 @@ pub struct StoredSource {
     pub target: String,      // URL or directory path or file path
     pub secret: Option<String>,
     pub enabled: bool,
+    #[serde(default)]
+    pub is_base: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -75,6 +77,7 @@ impl Database {
                 target TEXT NOT NULL,
                 secret TEXT,
                 enabled INTEGER NOT NULL DEFAULT 1,
+                is_base INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             );
 
@@ -89,6 +92,11 @@ impl Database {
 
         // Drop legacy deleted_sources blacklist table if it exists
         let _ = sqlx::query("DROP TABLE IF EXISTS deleted_sources")
+            .execute(&pool)
+            .await;
+
+        // Migration: add is_base column to sources table if missing
+        let _ = sqlx::query("ALTER TABLE sources ADD COLUMN is_base INTEGER NOT NULL DEFAULT 0")
             .execute(&pool)
             .await;
 
@@ -215,7 +223,7 @@ impl Database {
 
     #[allow(dead_code)]
     pub async fn get_all_sources(&self) -> Result<Vec<StoredSource>> {
-        let rows = sqlx::query("SELECT id, name, source_type, target, secret, enabled, created_at FROM sources ORDER BY created_at ASC")
+        let rows = sqlx::query("SELECT id, name, source_type, target, secret, enabled, is_base, created_at FROM sources ORDER BY created_at ASC")
             .fetch_all(&self.pool)
             .await?;
 
@@ -226,6 +234,7 @@ impl Database {
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now());
             let enabled_int: i64 = row.get("enabled");
+            let is_base_int: i64 = row.try_get("is_base").unwrap_or(0);
 
             sources.push(StoredSource {
                 id: row.get("id"),
@@ -234,6 +243,7 @@ impl Database {
                 target: row.get("target"),
                 secret: row.get("secret"),
                 enabled: enabled_int == 1,
+                is_base: is_base_int == 1,
                 created_at,
             });
         }
@@ -243,18 +253,20 @@ impl Database {
 
     pub async fn save_source(&self, source: &StoredSource) -> Result<()> {
         let enabled_int: i64 = if source.enabled { 1 } else { 0 };
+        let is_base_int: i64 = if source.is_base { 1 } else { 0 };
         let created_at_str = source.created_at.to_rfc3339();
 
         sqlx::query(
             r#"
-            INSERT INTO sources (id, name, source_type, target, secret, enabled, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sources (id, name, source_type, target, secret, enabled, is_base, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 source_type = excluded.source_type,
                 target = excluded.target,
                 secret = excluded.secret,
                 enabled = excluded.enabled,
+                is_base = excluded.is_base,
                 created_at = excluded.created_at
             "#,
         )
@@ -264,6 +276,7 @@ impl Database {
         .bind(&source.target)
         .bind(&source.secret)
         .bind(enabled_int)
+        .bind(is_base_int)
         .bind(created_at_str)
         .execute(&self.pool)
         .await?;
@@ -281,6 +294,19 @@ impl Database {
         Ok(())
     }
 
+    pub async fn toggle_source_base(&self, id: &str) -> Result<bool> {
+        let source = self.get_source(id).await?
+            .ok_or_else(|| crate::error::AppError::Config(format!("Source '{}' not found", id)))?;
+        let new_is_base = !source.is_base;
+        let is_base_int: i64 = if new_is_base { 1 } else { 0 };
+        sqlx::query("UPDATE sources SET is_base = ? WHERE id = ?")
+            .bind(is_base_int)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(new_is_base)
+    }
+
     pub async fn delete_source(&self, id: &str) -> Result<()> {
         sqlx::query("DELETE FROM sources WHERE id = ?")
             .bind(id)
@@ -290,7 +316,7 @@ impl Database {
     }
 
     pub async fn get_source(&self, id: &str) -> Result<Option<StoredSource>> {
-        let row = sqlx::query("SELECT id, name, source_type, target, secret, enabled, created_at FROM sources WHERE id = ?")
+        let row = sqlx::query("SELECT id, name, source_type, target, secret, enabled, is_base, created_at FROM sources WHERE id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
@@ -301,6 +327,7 @@ impl Database {
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now());
             let enabled_int: i64 = row.get("enabled");
+            let is_base_int: i64 = row.try_get("is_base").unwrap_or(0);
 
             Ok(Some(StoredSource {
                 id: row.get("id"),
@@ -309,6 +336,7 @@ impl Database {
                 target: row.get("target"),
                 secret: row.get("secret"),
                 enabled: enabled_int == 1,
+                is_base: is_base_int == 1,
                 created_at,
             }))
         } else {
@@ -323,6 +351,7 @@ impl Database {
         target: Option<&str>,
         secret: Option<Option<&str>>,
         enabled: Option<bool>,
+        is_base: Option<bool>,
     ) -> Result<Option<StoredSource>> {
         let existing = self.get_source(id).await?;
         if let Some(mut src) = existing {
@@ -337,6 +366,9 @@ impl Database {
             }
             if let Some(e) = enabled {
                 src.enabled = e;
+            }
+            if let Some(b) = is_base {
+                src.is_base = b;
             }
             self.save_source(&src).await?;
             Ok(Some(src))

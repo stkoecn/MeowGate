@@ -243,6 +243,16 @@ impl TemplateRenderer {
                 writeln!(out, "      - {}", Self::format_yaml_str(&country_name)).unwrap();
             }
         }
+        // Include base config custom groups in 🚀 节点选择
+        Self::for_each_base_doc(base_config, |map| {
+            if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
+                for g in existing_groups {
+                    if let Some(serde_yaml::Value::String(name)) = g.get(&serde_yaml::Value::String("name".to_string())) {
+                        writeln!(out, "      - {}", Self::format_yaml_str(name)).unwrap();
+                    }
+                }
+            }
+        });
         for node in &routable {
             writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
         }
@@ -476,19 +486,18 @@ impl TemplateRenderer {
         }
 
         // Base config extra proxy-groups
-        if let Some(base) = base_config {
-            if let Ok(serde_yaml::Value::Mapping(map)) = serde_yaml::from_str::<serde_yaml::Value>(base) {
-                if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
-                    for g in existing_groups {
-                        if let Ok(g_str) = serde_yaml::to_string(g) {
-                            for line in g_str.lines() {
-                                writeln!(out, "  {}", line).unwrap();
-                            }
+        Self::for_each_base_doc(base_config, |map| {
+            if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
+                for g in existing_groups {
+                    let seq = vec![g.clone()];
+                    if let Ok(g_str) = serde_yaml::to_string(&seq) {
+                        for line in g_str.lines() {
+                            writeln!(out, "  {}", line).unwrap();
                         }
                     }
                 }
             }
-        }
+        });
 
         // 5. Rules
         writeln!(out, "rules:").unwrap();
@@ -568,18 +577,16 @@ impl TemplateRenderer {
 
         // Base config extra rules, or default MATCH fallback
         let mut has_base_rules = false;
-        if let Some(base) = base_config {
-            if let Ok(serde_yaml::Value::Mapping(map)) = serde_yaml::from_str::<serde_yaml::Value>(base) {
-                if let Some(serde_yaml::Value::Sequence(existing_rules)) = map.get(&serde_yaml::Value::String("rules".to_string())) {
-                    for r in existing_rules {
-                        if let Some(s) = r.as_str() {
-                            has_base_rules = true;
-                            writeln!(out, "{}", Self::format_yaml_rule(s)).unwrap();
-                        }
+        Self::for_each_base_doc(base_config, |map| {
+            if let Some(serde_yaml::Value::Sequence(existing_rules)) = map.get(&serde_yaml::Value::String("rules".to_string())) {
+                for r in existing_rules {
+                    if let Some(s) = r.as_str() {
+                        has_base_rules = true;
+                        writeln!(out, "{}", Self::format_yaml_rule(s)).unwrap();
                     }
                 }
             }
-        }
+        });
 
         if !has_base_rules {
             let match_target = if !routable.is_empty() {
@@ -592,40 +599,45 @@ impl TemplateRenderer {
         }
 
         // 6. Base config extra top-level keys
-        if let Some(base) = base_config {
-            if let Ok(serde_yaml::Value::Mapping(map)) = serde_yaml::from_str::<serde_yaml::Value>(base) {
-                for (k, v) in map {
-                    if let Some(k_str) = k.as_str() {
-                        if matches!(
-                            k_str,
-                            "mixed-port"
-                                | "bind-address"
-                                | "external-controller"
-                                | "allow-lan"
-                                | "mode"
-                                | "log-level"
-                                | "authentication"
-                                | "proxies"
-                                | "proxy-groups"
-                                | "rules"
-                        ) {
-                            continue;
-                        }
-                        if let Ok(v_yaml) = serde_yaml::to_string(&v) {
-                            let v_trimmed = v_yaml.trim();
-                            if v_trimmed.contains('\n') {
-                                writeln!(out, "{}:", k_str).unwrap();
-                                for line in v_trimmed.lines() {
-                                    writeln!(out, "  {}", line).unwrap();
-                                }
-                            } else {
-                                writeln!(out, "{}: {}", k_str, v_trimmed).unwrap();
+        Self::for_each_base_doc(base_config, |map| {
+            for (k, v) in map {
+                if let Some(k_str) = k.as_str() {
+                    if matches!(
+                        k_str,
+                        "mixed-port"
+                            | "port"
+                            | "socks-port"
+                            | "redir-port"
+                            | "tproxy-port"
+                            | "bind-address"
+                            | "external-controller"
+                            | "secret"
+                            | "allow-lan"
+                            | "mode"
+                            | "log-level"
+                            | "unified-delay"
+                            | "tcp-concurrent"
+                            | "authentication"
+                            | "proxies"
+                            | "proxy-groups"
+                            | "rules"
+                    ) {
+                        continue;
+                    }
+                    if let Ok(v_yaml) = serde_yaml::to_string(&v) {
+                        let v_trimmed = v_yaml.trim();
+                        if v_trimmed.contains('\n') {
+                            writeln!(out, "{}:", k_str).unwrap();
+                            for line in v_trimmed.lines() {
+                                writeln!(out, "  {}", line).unwrap();
                             }
+                        } else {
+                            writeln!(out, "{}: {}", k_str, v_trimmed).unwrap();
                         }
                     }
                 }
             }
-        }
+        });
 
         Ok(out)
     }
@@ -671,6 +683,24 @@ impl TemplateRenderer {
     }
 
     /// Formats a single rule line in `rules:`.
+    /// Iterates over every YAML document in `base_config` (which may contain multiple documents separated by `\n---\n`).
+    pub fn for_each_base_doc<F>(base: Option<&str>, mut f: F)
+    where
+        F: FnMut(&serde_yaml::Mapping),
+    {
+        if let Some(b) = base {
+            for part in b.split("\n---\n") {
+                let part_trimmed = part.trim();
+                if part_trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(serde_yaml::Value::Mapping(map)) = serde_yaml::from_str::<serde_yaml::Value>(part_trimmed) {
+                    f(&map);
+                }
+            }
+        }
+    }
+
     /// Formats the main selector group name with Beijing time (UTC+8) timestamp, e.g. "🚀 节点选择 (10-25 14:05)"
     pub fn format_main_selector_name() -> String {
         let beijing_time = chrono::Utc::now() + chrono::Duration::hours(8);
@@ -868,6 +898,16 @@ impl TemplateRenderer {
                 writeln!(out, "      - {}", Self::format_yaml_str(&country_name)).unwrap();
             }
         }
+        // Include base config custom groups in 🚀 节点选择
+        Self::for_each_base_doc(base_config, |map| {
+            if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
+                for g in existing_groups {
+                    if let Some(serde_yaml::Value::String(name)) = g.get(&serde_yaml::Value::String("name".to_string())) {
+                        writeln!(out, "      - {}", Self::format_yaml_str(name)).unwrap();
+                    }
+                }
+            }
+        });
         for node in &routable {
             writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
         }
@@ -1077,28 +1117,81 @@ impl TemplateRenderer {
             }
         }
 
-        // 5. Rules section
-        writeln!(out).unwrap();
-        writeln!(out, "rules:").unwrap();
-        let mut has_base_rules = false;
-        if let Some(base) = base_config {
-            if let Ok(serde_yaml::Value::Mapping(map)) = serde_yaml::from_str::<serde_yaml::Value>(base) {
-                if let Some(serde_yaml::Value::Sequence(existing_rules)) = map.get(&serde_yaml::Value::String("rules".to_string())) {
-                    for r in existing_rules {
-                        if let Some(s) = r.as_str() {
-                            has_base_rules = true;
-                            writeln!(out, "{}", Self::format_yaml_rule(s)).unwrap();
+        // Base config extra proxy-groups in subscription
+        Self::for_each_base_doc(base_config, |map| {
+            if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
+                for g in existing_groups {
+                    let seq = vec![g.clone()];
+                    if let Ok(g_str) = serde_yaml::to_string(&seq) {
+                        for line in g_str.lines() {
+                            writeln!(out, "  {}", line).unwrap();
                         }
                     }
                 }
             }
-        }
+        });
+
+        // 5. Rules section
+        writeln!(out).unwrap();
+        writeln!(out, "rules:").unwrap();
+        let mut has_base_rules = false;
+        Self::for_each_base_doc(base_config, |map| {
+            if let Some(serde_yaml::Value::Sequence(existing_rules)) = map.get(&serde_yaml::Value::String("rules".to_string())) {
+                for r in existing_rules {
+                    if let Some(s) = r.as_str() {
+                        has_base_rules = true;
+                        writeln!(out, "{}", Self::format_yaml_rule(s)).unwrap();
+                    }
+                }
+            }
+        });
 
         if !has_base_rules {
             Self::write_standard_direct_rules(&mut out, true);
             let match_rule = format!("MATCH,{}", main_selector_name);
             writeln!(out, "  - {}", match_rule).unwrap();
         }
+
+        // Base config extra top-level keys in subscription (e.g. dns, tun, sniffer, hosts)
+        Self::for_each_base_doc(base_config, |map| {
+            for (k, v) in map {
+                if let Some(k_str) = k.as_str() {
+                    if matches!(
+                        k_str,
+                        "mixed-port"
+                            | "port"
+                            | "socks-port"
+                            | "redir-port"
+                            | "tproxy-port"
+                            | "bind-address"
+                            | "external-controller"
+                            | "secret"
+                            | "allow-lan"
+                            | "mode"
+                            | "log-level"
+                            | "unified-delay"
+                            | "tcp-concurrent"
+                            | "authentication"
+                            | "proxies"
+                            | "proxy-groups"
+                            | "rules"
+                    ) {
+                        continue;
+                    }
+                    if let Ok(v_yaml) = serde_yaml::to_string(&v) {
+                        let v_trimmed = v_yaml.trim();
+                        if v_trimmed.contains('\n') {
+                            writeln!(out, "{}:", k_str).unwrap();
+                            for line in v_trimmed.lines() {
+                                writeln!(out, "  {}", line).unwrap();
+                            }
+                        } else {
+                            writeln!(out, "{}: {}", k_str, v_trimmed).unwrap();
+                        }
+                    }
+                }
+            }
+        });
 
         Ok(out)
     }

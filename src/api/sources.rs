@@ -18,6 +18,8 @@ pub struct CreateSourceRequest {
     pub secret: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub is_base: bool,
 }
 
 /// Automatically infers a clean, human-readable source name when the user doesn't provide one
@@ -79,6 +81,7 @@ pub struct UpdateSourceRequest {
     pub target: Option<String>,
     pub secret: Option<String>,
     pub enabled: Option<bool>,
+    pub is_base: Option<bool>,
 }
 
 pub async fn list_sources(
@@ -233,6 +236,7 @@ pub async fn create_source(
                         target: target_str,
                         secret: None,
                         enabled: payload.enabled,
+                        is_base: payload.is_base,
                         created_at: Utc::now(),
                     };
                     state.db.save_source(&s).await?;
@@ -268,6 +272,7 @@ pub async fn create_source(
         target,
         secret,
         enabled: payload.enabled,
+        is_base: payload.is_base,
         created_at: Utc::now(),
     };
 
@@ -282,6 +287,25 @@ pub async fn create_source(
         "success": true,
         "message": format!("已成功登记配置源「{}」并完成热重载", source.name),
         "data": source,
+        "total_nodes": count
+    })))
+}
+
+pub async fn toggle_source_base(
+    Path(id): Path<String>,
+    State(state): State<SharedState>,
+) -> Result<Json<Value>> {
+    let new_is_base = state.db.toggle_source_base(&id).await?;
+
+    // Auto-sync after toggling base inheritance and apply hot reload to Mihomo immediately
+    let count = state.sync_nodes_and_users(false).await?;
+    let _ = state.apply_and_reload().await;
+    *state.status_cache.lock().await = None;
+
+    Ok(Json(json!({
+        "success": true,
+        "is_base": new_is_base,
+        "message": format!("配置源继承状态已更新为: {}", if new_is_base { "开启继承" } else { "关闭继承" }),
         "total_nodes": count
     })))
 }
@@ -354,6 +378,7 @@ pub async fn update_source(
         target_trimmed,
         secret_opt,
         payload.enabled,
+        payload.is_base,
     ).await?;
 
     if let Some(src) = updated {

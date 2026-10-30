@@ -599,31 +599,40 @@ impl TemplateRenderer {
         }
 
         // 6. Base config extra top-level keys
+        let mut seen_keys: HashSet<String> = [
+            "mixed-port",
+            "port",
+            "socks-port",
+            "redir-port",
+            "tproxy-port",
+            "bind-address",
+            "external-controller",
+            "secret",
+            "allow-lan",
+            "mode",
+            "log-level",
+            "unified-delay",
+            "tcp-concurrent",
+            "authentication",
+            "proxies",
+            "proxy-groups",
+            "rules",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        if !has_base_dns {
+            seen_keys.insert("dns".to_string());
+        }
+
         Self::for_each_base_doc(base_config, |map| {
             for (k, v) in map {
                 if let Some(k_str) = k.as_str() {
-                    if matches!(
-                        k_str,
-                        "mixed-port"
-                            | "port"
-                            | "socks-port"
-                            | "redir-port"
-                            | "tproxy-port"
-                            | "bind-address"
-                            | "external-controller"
-                            | "secret"
-                            | "allow-lan"
-                            | "mode"
-                            | "log-level"
-                            | "unified-delay"
-                            | "tcp-concurrent"
-                            | "authentication"
-                            | "proxies"
-                            | "proxy-groups"
-                            | "rules"
-                    ) {
+                    if seen_keys.contains(k_str) {
                         continue;
                     }
+                    seen_keys.insert(k_str.to_string());
                     if let Ok(v_yaml) = serde_yaml::to_string(&v) {
                         let v_trimmed = v_yaml.trim();
                         if v_trimmed.contains('\n') {
@@ -829,17 +838,22 @@ impl TemplateRenderer {
         writeln!(out).unwrap();
 
         // 2. High-performance DNS (Fake-IP mode with public high-speed resolvers)
-        writeln!(out, "dns:").unwrap();
-        writeln!(out, "  enable: true").unwrap();
-        writeln!(out, "  ipv6: false").unwrap();
-        writeln!(out, "  enhanced-mode: fake-ip").unwrap();
-        writeln!(out, "  fake-ip-range: 198.18.0.1/16").unwrap();
-        writeln!(out, "  nameserver:").unwrap();
-        writeln!(out, "    - 223.5.5.5").unwrap();
-        writeln!(out, "    - 119.29.29.29").unwrap();
-        writeln!(out, "    - 180.76.76.76").unwrap();
-        writeln!(out, "    - 1.1.1.1").unwrap();
-        writeln!(out).unwrap();
+        let has_base_dns = base_config
+            .map(|b| b.contains("dns:") || b.contains("\ndns:"))
+            .unwrap_or(false);
+        if !has_base_dns {
+            writeln!(out, "dns:").unwrap();
+            writeln!(out, "  enable: true").unwrap();
+            writeln!(out, "  ipv6: false").unwrap();
+            writeln!(out, "  enhanced-mode: fake-ip").unwrap();
+            writeln!(out, "  fake-ip-range: 198.18.0.1/16").unwrap();
+            writeln!(out, "  nameserver:").unwrap();
+            writeln!(out, "    - 223.5.5.5").unwrap();
+            writeln!(out, "    - 119.29.29.29").unwrap();
+            writeln!(out, "    - 180.76.76.76").unwrap();
+            writeln!(out, "    - 1.1.1.1").unwrap();
+            writeln!(out).unwrap();
+        }
 
         // 3. Proxies section
         writeln!(out, "proxies:").unwrap();
@@ -1153,31 +1167,40 @@ impl TemplateRenderer {
         }
 
         // Base config extra top-level keys in subscription (e.g. dns, tun, sniffer, hosts)
+        let mut seen_sub_keys: HashSet<String> = [
+            "mixed-port",
+            "port",
+            "socks-port",
+            "redir-port",
+            "tproxy-port",
+            "bind-address",
+            "external-controller",
+            "secret",
+            "allow-lan",
+            "mode",
+            "log-level",
+            "unified-delay",
+            "tcp-concurrent",
+            "authentication",
+            "proxies",
+            "proxy-groups",
+            "rules",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        if !has_base_dns {
+            seen_sub_keys.insert("dns".to_string());
+        }
+
         Self::for_each_base_doc(base_config, |map| {
             for (k, v) in map {
                 if let Some(k_str) = k.as_str() {
-                    if matches!(
-                        k_str,
-                        "mixed-port"
-                            | "port"
-                            | "socks-port"
-                            | "redir-port"
-                            | "tproxy-port"
-                            | "bind-address"
-                            | "external-controller"
-                            | "secret"
-                            | "allow-lan"
-                            | "mode"
-                            | "log-level"
-                            | "unified-delay"
-                            | "tcp-concurrent"
-                            | "authentication"
-                            | "proxies"
-                            | "proxy-groups"
-                            | "rules"
-                    ) {
+                    if seen_sub_keys.contains(k_str) {
                         continue;
                     }
+                    seen_sub_keys.insert(k_str.to_string());
                     if let Ok(v_yaml) = serde_yaml::to_string(&v) {
                         let v_trimmed = v_yaml.trim();
                         if v_trimmed.contains('\n') {

@@ -146,6 +146,19 @@ dns:
     assert!(sub_with_base.contains("custom-base-rule.com"));
     assert!(sub_with_base.contains("fake-ip-range: 198.18.0.1/16"));
 
+    // Verify no duplicate top-level keys in subscription YAML (top-level keys start at column 0)
+    let dns_count = sub_with_base.lines().filter(|l| !l.starts_with(' ') && !l.starts_with('\t') && l.starts_with("dns:")).count();
+    assert_eq!(dns_count, 1, "Subscription YAML must have exactly one top-level dns: key!");
+
+    let proxies_count = sub_with_base.lines().filter(|l| !l.starts_with(' ') && !l.starts_with('\t') && l.starts_with("proxies:")).count();
+    assert_eq!(proxies_count, 1, "Subscription YAML must have exactly one top-level proxies: key!");
+
+    let rules_count = sub_with_base.lines().filter(|l| !l.starts_with(' ') && !l.starts_with('\t') && l.starts_with("rules:")).count();
+    assert_eq!(rules_count, 1, "Subscription YAML must have exactly one top-level rules: key!");
+
+    // Verify parseable with serde_yaml
+    let _: serde_yaml::Value = serde_yaml::from_str(&sub_with_base).expect("Subscription YAML must be valid YAML without duplicate keys");
+
     // Cleanup
     let _ = std::fs::remove_file(&base_file);
 }

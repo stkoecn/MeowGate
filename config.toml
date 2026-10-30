@@ -76,5 +76,5 @@ recover_threshold = 1
 down_retry_secs = 600
 # 并发探测数
 concurrency = 32
-# 健康检查目标 URL（Cloudflare Anycast 全球低延时节点）
-test_url = "http://cp.cloudflare.com/generate_204"
+# 健康检查目标 URL（Cloudflare Anycast 全球低延时节点，使用 HTTPS 避免明文劫持）
+test_url = "https://cp.cloudflare.com/generate_204"

@@ -92,7 +92,7 @@ fn default_fail_threshold() -> u32 { 2 }
 fn default_recover_threshold() -> u32 { 1 }
 fn default_down_retry() -> u64 { 600 }
 fn default_health_concurrency() -> usize { 32 }
-fn default_test_url() -> String { "http://cp.cloudflare.com/generate_204".to_string() }
+fn default_test_url() -> String { "https://cp.cloudflare.com/generate_204".to_string() }
 
 impl Default for HealthPolicy {
     fn default() -> Self {

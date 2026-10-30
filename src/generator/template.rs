@@ -327,7 +327,7 @@ impl TemplateRenderer {
         // Group "⚡ 自动选择": url-test containing all healthy nodes
         writeln!(out, "  - name: ⚡ 自动选择").unwrap();
         writeln!(out, "    type: url-test").unwrap();
-        writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+        writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
         writeln!(out, "    interval: 300").unwrap();
         writeln!(out, "    lazy: true").unwrap();
         writeln!(out, "    proxies:").unwrap();
@@ -347,7 +347,7 @@ impl TemplateRenderer {
             // auto
             writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_name)).unwrap();
             writeln!(out, "    type: url-test").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 300").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -362,7 +362,7 @@ impl TemplateRenderer {
             // fb
             writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_name)).unwrap();
             writeln!(out, "    type: fallback").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 120").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -383,7 +383,7 @@ impl TemplateRenderer {
             // auto
             writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_name)).unwrap();
             writeln!(out, "    type: url-test").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 300").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -398,7 +398,7 @@ impl TemplateRenderer {
             // fb
             writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_name)).unwrap();
             writeln!(out, "    type: fallback").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 120").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -422,7 +422,7 @@ impl TemplateRenderer {
             // auto
             writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_name)).unwrap();
             writeln!(out, "    type: url-test").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 300").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -433,7 +433,7 @@ impl TemplateRenderer {
             // fb
             writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_name)).unwrap();
             writeln!(out, "    type: fallback").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 120").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -453,7 +453,7 @@ impl TemplateRenderer {
             // auto
             writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_name)).unwrap();
             writeln!(out, "    type: url-test").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 300").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    hidden: true").unwrap();
@@ -465,7 +465,7 @@ impl TemplateRenderer {
             // fb
             writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_name)).unwrap();
             writeln!(out, "    type: fallback").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 120").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    hidden: true").unwrap();
@@ -565,15 +565,15 @@ impl TemplateRenderer {
             }
         }
 
-        // 5e. Guest unauthenticated rule: routes to dynamic 🚀 节点选择 group
-        let guest_rule = format!("IN-USER,guest,{}", main_selector_name);
-        writeln!(out, "{}", Self::format_yaml_rule(&guest_rule)).unwrap();
-
         // 5f. Standard China and user private direct rules (for unauthenticated / guest proxy traffic)
         let has_geoip = std::path::Path::new("geoip.metadb").exists()
             || std::path::Path::new("geoip.dat").exists()
             || std::path::Path::new("Country.mmdb").exists();
         Self::write_standard_direct_rules(&mut out, has_geoip);
+
+        // 5g. Guest unauthenticated rule: routes to dynamic 🚀 节点选择 group
+        let guest_rule = format!("IN-USER,guest,{}", main_selector_name);
+        writeln!(out, "{}", Self::format_yaml_rule(&guest_rule)).unwrap();
 
         // Base config extra rules, or default MATCH fallback
         let mut has_base_rules = false;
@@ -982,7 +982,7 @@ impl TemplateRenderer {
         // 4b. ⚡ 自动选择 url-test group
         writeln!(out, "  - name: ⚡ 自动选择").unwrap();
         writeln!(out, "    type: url-test").unwrap();
-        writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+        writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
         writeln!(out, "    interval: 300").unwrap();
         writeln!(out, "    lazy: true").unwrap();
         writeln!(out, "    proxies:").unwrap();
@@ -1004,7 +1004,7 @@ impl TemplateRenderer {
 
             writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_name)).unwrap();
             writeln!(out, "    type: url-test").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 300").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -1014,7 +1014,7 @@ impl TemplateRenderer {
 
             writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_name)).unwrap();
             writeln!(out, "    type: fallback").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 120").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -1030,7 +1030,7 @@ impl TemplateRenderer {
 
             writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_name)).unwrap();
             writeln!(out, "    type: url-test").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 300").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -1044,7 +1044,7 @@ impl TemplateRenderer {
 
             writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_name)).unwrap();
             writeln!(out, "    type: fallback").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 120").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -1067,7 +1067,7 @@ impl TemplateRenderer {
 
             writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_name)).unwrap();
             writeln!(out, "    type: url-test").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 300").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -1077,7 +1077,7 @@ impl TemplateRenderer {
 
             writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_name)).unwrap();
             writeln!(out, "    type: fallback").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 120").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    proxies:").unwrap();
@@ -1096,7 +1096,7 @@ impl TemplateRenderer {
 
             writeln!(out, "  - name: {}", Self::format_yaml_str(&auto_name)).unwrap();
             writeln!(out, "    type: url-test").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 300").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    hidden: true").unwrap();
@@ -1107,7 +1107,7 @@ impl TemplateRenderer {
 
             writeln!(out, "  - name: {}", Self::format_yaml_str(&fb_name)).unwrap();
             writeln!(out, "    type: fallback").unwrap();
-            writeln!(out, "    url: http://cp.cloudflare.com/generate_204").unwrap();
+            writeln!(out, "    url: https://cp.cloudflare.com/generate_204").unwrap();
             writeln!(out, "    interval: 120").unwrap();
             writeln!(out, "    lazy: true").unwrap();
             writeln!(out, "    hidden: true").unwrap();

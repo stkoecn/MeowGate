@@ -485,11 +485,53 @@ impl TemplateRenderer {
             writeln!(out, "      - {}", Self::format_yaml_str(&node.name)).unwrap();
         }
 
+        // Valid targets that can be referenced in gateway proxy-groups
+        let mut valid_gateway_targets: HashSet<String> = nodes.iter().map(|n| n.name.clone()).collect();
+        valid_gateway_targets.insert("DIRECT".to_string());
+        valid_gateway_targets.insert("REJECT".to_string());
+        valid_gateway_targets.insert("PASS".to_string());
+        valid_gateway_targets.insert("COMPATIBLE".to_string());
+        valid_gateway_targets.insert("GLOBAL".to_string());
+        valid_gateway_targets.insert(main_selector_name.clone());
+        valid_gateway_targets.insert("⚡ 自动选择".to_string());
+        valid_gateway_targets.insert("📶 延时分级".to_string());
+        valid_gateway_targets.insert("⚡ 速度分组".to_string());
+        valid_gateway_targets.insert("🌍 地区分组".to_string());
+        for node in &routable {
+            valid_gateway_targets.insert(format!("node-{}", node.name));
+        }
+        for rg in region_groups {
+            valid_gateway_targets.insert(crate::generator::groups::region_group_name(&rg.code, false));
+            valid_gateway_targets.insert(crate::generator::groups::region_group_name(&rg.code, true));
+        }
+        for lg in level_groups {
+            valid_gateway_targets.insert(crate::generator::level_groups::level_group_name(&lg.code, false));
+            valid_gateway_targets.insert(crate::generator::level_groups::level_group_name(&lg.code, true));
+        }
+        for sg in speed_groups {
+            valid_gateway_targets.insert(crate::generator::speed_groups::speed_group_name(&sg.code, false));
+            valid_gateway_targets.insert(crate::generator::speed_groups::speed_group_name(&sg.code, true));
+        }
+        for ig in ip_groups {
+            valid_gateway_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, false));
+            valid_gateway_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, true));
+        }
+        Self::for_each_base_doc(base_config, |map| {
+            if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
+                for g in existing_groups {
+                    if let Some(name) = g.get(&serde_yaml::Value::String("name".to_string())).and_then(|n| n.as_str()) {
+                        valid_gateway_targets.insert(name.to_string());
+                    }
+                }
+            }
+        });
+
         // Base config extra proxy-groups
         Self::for_each_base_doc(base_config, |map| {
             if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
                 for g in existing_groups {
-                    let seq = vec![g.clone()];
+                    let sanitized_group = Self::sanitize_base_proxy_group(g, &valid_gateway_targets);
+                    let seq = vec![sanitized_group];
                     if let Ok(g_str) = serde_yaml::to_string(&seq) {
                         for line in g_str.lines() {
                             writeln!(out, "  {}", line).unwrap();
@@ -1131,11 +1173,53 @@ impl TemplateRenderer {
             }
         }
 
+        // Valid targets that can be referenced in subscription proxy-groups:
+        // Any proxy name in nodes, any group name, or standard built-in targets.
+        let mut valid_sub_targets: HashSet<String> = nodes.iter().map(|n| n.name.clone()).collect();
+        valid_sub_targets.insert("DIRECT".to_string());
+        valid_sub_targets.insert("REJECT".to_string());
+        valid_sub_targets.insert("PASS".to_string());
+        valid_sub_targets.insert("COMPATIBLE".to_string());
+        valid_sub_targets.insert("GLOBAL".to_string());
+        valid_sub_targets.insert(main_selector_name.clone());
+        valid_sub_targets.insert("⚡ 自动选择".to_string());
+        valid_sub_targets.insert("📶 延时分级".to_string());
+        valid_sub_targets.insert("⚡ 速度梯队".to_string());
+        valid_sub_targets.insert("🌍 地区选择".to_string());
+        for rg in region_groups {
+            valid_sub_targets.insert(crate::generator::groups::region_group_name(&rg.code, false));
+            valid_sub_targets.insert(crate::generator::groups::region_group_name(&rg.code, true));
+        }
+        for lg in level_groups {
+            valid_sub_targets.insert(crate::generator::level_groups::level_group_name(&lg.code, false));
+            valid_sub_targets.insert(crate::generator::level_groups::level_group_name(&lg.code, true));
+        }
+        for sg in speed_groups {
+            valid_sub_targets.insert(crate::generator::speed_groups::speed_group_name(&sg.code, false));
+            valid_sub_targets.insert(crate::generator::speed_groups::speed_group_name(&sg.code, true));
+        }
+        for ig in ip_groups {
+            valid_sub_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, false));
+            valid_sub_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, true));
+        }
+
+        // Collect names of all base proxy-groups so inter-group references remain valid
+        Self::for_each_base_doc(base_config, |map| {
+            if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
+                for g in existing_groups {
+                    if let Some(name) = g.get(&serde_yaml::Value::String("name".to_string())).and_then(|n| n.as_str()) {
+                        valid_sub_targets.insert(name.to_string());
+                    }
+                }
+            }
+        });
+
         // Base config extra proxy-groups in subscription
         Self::for_each_base_doc(base_config, |map| {
             if let Some(serde_yaml::Value::Sequence(existing_groups)) = map.get(&serde_yaml::Value::String("proxy-groups".to_string())) {
                 for g in existing_groups {
-                    let seq = vec![g.clone()];
+                    let sanitized_group = Self::sanitize_base_proxy_group(g, &valid_sub_targets);
+                    let seq = vec![sanitized_group];
                     if let Ok(g_str) = serde_yaml::to_string(&seq) {
                         for line in g_str.lines() {
                             writeln!(out, "  {}", line).unwrap();
@@ -1217,6 +1301,38 @@ impl TemplateRenderer {
         });
 
         Ok(out)
+    }
+
+    /// Filters a base config proxy-group so that its `proxies:` list only contains
+    /// names that actually exist in the current configuration or built-in targets.
+    /// If all proxies are filtered out, falls back to `["DIRECT"]` so the group is never empty.
+    pub fn sanitize_base_proxy_group(
+        group: &serde_yaml::Value,
+        valid_targets: &HashSet<String>,
+    ) -> serde_yaml::Value {
+        if let serde_yaml::Value::Mapping(map) = group {
+            let mut new_map = map.clone();
+            if let Some(serde_yaml::Value::Sequence(proxies_seq)) = map.get(&serde_yaml::Value::String("proxies".to_string())) {
+                let mut filtered_seq = Vec::new();
+                for p in proxies_seq {
+                    if let Some(p_str) = p.as_str() {
+                        if valid_targets.contains(p_str) {
+                            filtered_seq.push(p.clone());
+                        }
+                    }
+                }
+                if filtered_seq.is_empty() {
+                    filtered_seq.push(serde_yaml::Value::String("DIRECT".to_string()));
+                }
+                new_map.insert(
+                    serde_yaml::Value::String("proxies".to_string()),
+                    serde_yaml::Value::Sequence(filtered_seq),
+                );
+            }
+            serde_yaml::Value::Mapping(new_map)
+        } else {
+            group.clone()
+        }
     }
 
 }

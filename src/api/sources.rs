@@ -24,10 +24,37 @@ pub struct CreateSourceRequest {
 
 /// Automatically infers a clean, human-readable source name when the user doesn't provide one
 pub fn infer_source_name(target: &str, source_type: &str) -> String {
+    let target_trim = target.trim();
+    if target_trim.starts_with("http://") || target_trim.starts_with("https://") {
+        if source_type == "clash_api" {
+            let clean = target_trim
+                .trim_start_matches("http://")
+                .trim_start_matches("https://")
+                .trim_end_matches('/');
+            return format!("Clash API ({})", clean);
+        }
+        if let Ok(url) = reqwest::Url::parse(target_trim) {
+            if let Some(mut segments) = url.path_segments() {
+                if let Some(last) = segments.next_back() {
+                    let stem = last
+                        .strip_suffix(".yaml")
+                        .or_else(|| last.strip_suffix(".yml"))
+                        .unwrap_or(last);
+                    if !stem.is_empty() && stem != "/" {
+                        return stem.to_string();
+                    }
+                }
+            }
+            if let Some(host) = url.host_str() {
+                return format!("订阅 ({})", host);
+            }
+        }
+        return "远程订阅".to_string();
+    }
+
     match source_type {
         "clash_api" => {
-            let clean = target
-                .trim()
+            let clean = target_trim
                 .trim_start_matches("http://")
                 .trim_start_matches("https://")
                 .trim_end_matches('/');
@@ -157,18 +184,18 @@ pub async fn create_source(
 
     let existing = state.db.get_all_sources().await?;
 
-    // Check duplicate targets: never add the same file or API twice
-    if payload.source_type == "clash_file" {
+    // Check duplicate targets: never add the same file, URL, or API twice
+    if payload.source_type == "clash_file" || payload.source_type == "remote" || payload.source_type == "subscription" {
+        let is_url = target.starts_with("http://") || target.starts_with("https://");
         let p = std::path::Path::new(&target);
-        let _target_canonical = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
 
         for s in &existing {
-            if s.source_type == "clash_file" {
-                if s.target == target {
-                    return Err(crate::error::AppError::Config(format!(
-                        "该文件路径已登记为配置源「{}」，不能重复添加", s.name
-                    )));
-                }
+            if s.target == target {
+                return Err(crate::error::AppError::Config(format!(
+                    "该文件路径或订阅链接已登记为配置源「{}」，不能重复添加", s.name
+                )));
+            }
+            if !is_url {
                 let s_p = std::path::Path::new(&s.target);
                 if let (Ok(c1), Ok(c2)) = (std::fs::canonicalize(p), std::fs::canonicalize(s_p)) {
                     if c1 == c2 {

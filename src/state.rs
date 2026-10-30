@@ -296,16 +296,20 @@ impl AppState {
                         tracing::warn!("clash_dir source directory does not exist: {}", source.target);
                     }
                 }
-                "clash_file" => {
-                    let path = std::path::Path::new(&source.target);
-                    if path.exists() && path.is_file() {
-                        if let Ok(parsed) = YamlParser::parse_file(path) {
-                            for node in parsed {
-                                add_node(node, is_base);
+                "clash_file" | "remote" | "subscription" => {
+                    if let Some(content) = self.fetch_or_read_source_content(&source.target).await {
+                        match YamlParser::parse_str(&content) {
+                            Ok(parsed) => {
+                                for node in parsed {
+                                    add_node(node, is_base);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to parse YAML from source '{}': {}", source.name, e);
                             }
                         }
                     } else {
-                        tracing::warn!("clash_file does not exist: {}", source.target);
+                        tracing::warn!("Source file or URL unreachable: {}", source.target);
                     }
                 }
                 other => {
@@ -410,6 +414,65 @@ impl AppState {
         Ok(node_count)
     }
 
+    /// Reads or downloads content from a local file path or remote HTTP/HTTPS subscription URL.
+    /// Remote URLs are cached to `cache/sub_<hash>.yaml` for offline availability.
+    pub async fn fetch_or_read_source_content(&self, target: &str) -> Option<String> {
+        let trimmed = target.trim();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            let cache_dir = std::path::Path::new("cache");
+            let _ = std::fs::create_dir_all(cache_dir);
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            trimmed.hash(&mut hasher);
+            let url_hash = format!("{:016x}", hasher.finish());
+            let cache_path = cache_dir.join(format!("sub_{}.yaml", url_hash));
+
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(std::time::Duration::from_secs(20))
+                .build()
+                .unwrap_or_default();
+
+            match client
+                .get(trimmed)
+                .header("User-Agent", "ClashMeta/1.19.33 (MeowGate Gateway)")
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(text) = resp.text().await {
+                        if !text.is_empty() {
+                            let _ = std::fs::write(&cache_path, &text);
+                            return Some(text);
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    tracing::warn!("Remote subscription URL '{}' returned HTTP status {}", trimmed, resp.status());
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to fetch remote subscription URL '{}': {:#}", trimmed, e);
+                }
+            }
+
+            if cache_path.exists() {
+                if let Ok(cached) = std::fs::read_to_string(&cache_path) {
+                    tracing::info!("Using cached remote subscription for '{}'", trimmed);
+                    return Some(cached);
+                }
+            }
+
+            None
+        } else {
+            let path = std::path::Path::new(trimmed);
+            if path.exists() && path.is_file() {
+                std::fs::read_to_string(path).ok()
+            } else {
+                None
+            }
+        }
+    }
+
     /// Retrieves the effective base configuration string.
     /// Priority:
     /// 1. Any enabled source with `is_base: true` (reads from file path or URL)
@@ -419,12 +482,8 @@ impl AppState {
         let mut combined_bases = Vec::new();
         for s in sources {
             if s.enabled && s.is_base {
-                let target = s.target.trim();
-                let path = std::path::Path::new(target);
-                if path.exists() && path.is_file() {
-                    if let Ok(content) = std::fs::read_to_string(path) {
-                        combined_bases.push(content);
-                    }
+                if let Some(content) = self.fetch_or_read_source_content(&s.target).await {
+                    combined_bases.push(content);
                 }
             }
         }

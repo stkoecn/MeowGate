@@ -3254,7 +3254,7 @@
 
                     <!-- Type badge -->
                     <td>
-                      <span class="badge font-mono" :style="getSourceTypeBadgeStyle(src.source_type)" x-text="getSourceTypeLabel(src.source_type)"></span>
+                      <span class="badge font-mono" :style="getSourceTypeBadgeStyle(src.source_type, src.target)" x-text="getSourceTypeLabel(src.source_type, src.target)"></span>
                     </td>
 
                     <!-- Target & secret note -->
@@ -3343,7 +3343,8 @@
                   x-model="newSource.source_type" 
                   class="select-compact font-ui" 
                   style="width: 100%; height: 26px;">
-                  <option value="clash_file">本地订阅配置文件 (clash_file)</option>
+                  <option value="clash_file">本地或远程订阅配置 (文件路径或 http/https 链接)</option>
+                  <option value="remote">远程 Clash 订阅链接 (HTTP/HTTPS URL)</option>
                   <option value="clash_api">Clash / Mihomo 服务接口 (clash_api)</option>
                   <option value="clash_dir">本地配置目录 (clash_dir)</option>
                 </select>
@@ -3361,7 +3362,8 @@
                   :placeholder="
                     newSource.source_type === 'clash_api' ? 'http://127.0.0.1:9090' :
                     newSource.source_type === 'clash_dir' ? 'C:/Users/name/.config/clash/profiles' :
-                    'C:/Users/name/AppData/Roaming/.../profile.yaml'
+                    newSource.source_type === 'remote' ? 'https://example.com/vps.yaml' :
+                    'https://example.com/vps.yaml 或 C:/.../profile.yaml'
                   " 
                   class="input-compact font-mono" 
                   style="width: 100%; height: 26px;">
@@ -5799,17 +5801,29 @@
           return t;
         },
 
-        getSourceTypeLabel(type) {
+        getSourceTypeLabel(type, target) {
+          if (target && (target.startsWith('http://') || target.startsWith('https://'))) {
+            return '远程订阅链接';
+          }
           switch (type) {
             case 'auto_detect': return '本机全量嗅探';
             case 'clash_api': return 'Clash 服务接口';
             case 'clash_dir': return 'Clash 配置目录';
             case 'clash_file': return '本地订阅配置';
+            case 'remote':
+            case 'subscription': return '远程订阅链接';
             default: return type || '未知类型';
           }
         },
 
-        getSourceTypeBadgeStyle(type) {
+        getSourceTypeBadgeStyle(type, target) {
+          if ((target && (target.startsWith('http://') || target.startsWith('https://'))) || type === 'remote' || type === 'subscription') {
+            return {
+              color: '#38bdf8',
+              borderColor: 'rgba(56, 189, 248, 0.35)',
+              background: 'rgba(56, 189, 248, 0.12)'
+            };
+          }
           switch (type) {
             case 'auto_detect':
               return {

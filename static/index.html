@@ -1048,26 +1048,30 @@
 
       .app-container { padding: 8px 10px; gap: 8px; }
 
-      /* Mobile View Switcher: Segmented Control Bar */
+      /* Mobile View Switcher: Segmented Scrollable Ribbon */
       .view-switcher {
-        display: grid !important;
-        grid-template-columns: repeat(5, 1fr) !important;
-        gap: 3px !important;
+        display: flex !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        scrollbar-width: none !important;
+        gap: 4px !important;
         padding: 3px !important;
         background: var(--bg-subtle) !important;
         border-radius: 8px !important;
         border: 1px solid var(--border) !important;
+        flex-wrap: nowrap !important;
       }
+      .view-switcher::-webkit-scrollbar { display: none !important; }
       .view-switcher button {
         height: 32px !important;
-        padding: 0 4px !important;
+        padding: 0 10px !important;
         font-size: 11px !important;
         justify-content: center !important;
         border-radius: 6px !important;
         white-space: nowrap !important;
-        width: 100% !important;
+        flex-shrink: 0 !important;
       }
-      .view-switcher button .badge { display: none !important; }
+      .view-switcher button .badge { display: inline-flex !important; margin-left: 4px !important; }
       .view-switcher button i { margin-right: 3px !important; width: 12px !important; height: 12px !important; }
 
       /* Mobile Filter Bar */
@@ -1459,6 +1463,10 @@
       <button @click="switchToSpeedGroups()" :class="activeView === 'speed_groups' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
         <i data-lucide="zap" style="width: 13px; height: 13px; margin-right: 4px;"></i>速度分组
         <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="speedGroups.length"></span>
+      </button>
+      <button @click="switchToInheritedGroups()" :class="activeView === 'inherited_groups' ? 'btn-primary' : 'btn-ghost'" class="btn-ghost" style="height: 26px; padding: 0 12px; font-size: 12px;">
+        <i data-lucide="layers" style="width: 13px; height: 13px; margin-right: 4px;"></i>继承分组
+        <span class="badge" style="margin-left: 6px; font-size: 10px;" x-text="inheritedGroups.length"></span>
       </button>
     </div>
 
@@ -2997,6 +3005,154 @@
       </div>
     </div>
 
+    <!-- ===== INHERITED GROUPS VIEW ===== -->
+    <div x-cloak x-show="activeView === 'inherited_groups'" class="panel-card table-panel" style="overflow: hidden;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-panel); flex-shrink: 0; gap: 10px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 13px; font-weight: 600;"><i data-lucide="layers" style="width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; color: var(--accent);"></i>基础继承分组聚合</span>
+          <span class="text-dim" style="font-size: 11px;" x-text="'共 ' + inheritedGroups.length + ' 个分组，覆盖 ' + inheritedGroupTotalNodes + ' 个节点'"></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="text" x-model.debounce.150ms="inheritedSearch" placeholder="搜索分组、类型或来源..." class="input-compact" style="width: 170px;">
+          <button @click="probeAllInheritedGroups()" class="btn-ghost" style="height: 26px; padding: 0 10px; font-size: 12px;" :disabled="isInheritedProbing" :class="{ 'pulse': isInheritedProbing }" title="探测所有继承分组入口">
+            <i data-lucide="activity" style="width: 13px; height: 13px;" :class="{ 'spin': isInheritedProbing }"></i>
+            <span x-text="isInheritedProbing ? '探测中' : '探测全部'"></span>
+          </button>
+          <button @click="inheritedCards = !inheritedCards" class="btn-ghost" style="height: 26px; padding: 0 10px; font-size: 12px;" :title="inheritedCards ? '切换回表格视图' : '切换为卡片视图'">
+            <i data-lucide="layout-list" x-show="!inheritedCards" style="width: 12px; height: 12px;"></i>
+            <i data-lucide="table-2" x-show="inheritedCards" style="width: 12px; height: 12px;"></i>
+            <span x-text="inheritedCards ? '表格' : '卡片'"></span>
+          </button>
+          <button @click="fetchInheritedGroups()" class="btn-ghost" style="height: 26px; padding: 0 10px; font-size: 12px;" title="重新加载">
+            <i data-lucide="refresh-cw" style="width: 13px; height: 13px;"></i>
+          </button>
+        </div>
+      </div>
+
+      <div style="padding: 8px 12px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0;">
+        继承自开启「基础继承」配置源的自定义策略组。专属账号格式：<code class="font-mono" style="color: var(--accent);">&lt;组名&gt;</code>（如 <code class="font-mono" style="color: var(--accent);">us1</code>），密码与账号相同，支持别名 <code class="font-mono" style="color: var(--accent);">g_&lt;组名&gt;</code>。用户可直接在代理客户端通过指定该凭据直达上游自定义节点池。
+      </div>
+
+      <div class="table-scroll" :class="{ 'cards-on': inheritedCards }">
+        <table class="data-table regions-table">
+          <thead>
+            <tr>
+              <th style="width: 220px;">分组名称 / 策略类型</th>
+              <th style="width: 200px;">分流策略 / 凭证</th>
+              <th style="min-width: 240px;">当前盯住节点</th>
+              <th style="width: 115px;">连通性 (近10次)</th>
+              <th style="width: 190px;">实测状态 / 延时</th>
+              <th style="width: 110px; text-align: right;">操作</th>
+            </tr>
+          </thead>
+          <template x-if="filteredInheritedGroups.length === 0">
+            <tbody>
+              <tr>
+                <td colspan="6" style="height: 120px; text-align: center; color: var(--text-dim); padding: 24px;">
+                  <i data-lucide="layers" style="width: 24px; height: 24px; margin: 0 auto 8px; opacity: 0.5;"></i>
+                  <div>暂无继承分组数据</div>
+                  <div style="font-size: 11px; margin-top: 4px; opacity: 0.8;">请在顶部「配置与源管理」中，对包含 proxy-groups 的配置源开启「基础继承」开关</div>
+                </td>
+              </tr>
+            </tbody>
+          </template>
+          <template x-for="ig in filteredInheritedGroups" :key="ig.name">
+            <tbody class="region-pair">
+              <tr class="region-row-auto">
+                <td class="region-overview-cell">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--accent);"></span>
+                    <span class="font-mono" style="font-weight: 700; font-size: 15px; letter-spacing: 0.5px; color: var(--accent);" x-text="ig.name"></span>
+                    <span class="badge" style="font-size: 10px; border-color: var(--accent); color: var(--accent);" x-text="ig.strategy_desc"></span>
+                  </div>
+                  <div class="text-dim" style="font-size: 11px; margin-top: 3px;">
+                    <span x-text="ig.node_count + ' 节点 · ' + ig.healthy_count + ' 存活'"></span>
+                    <template x-if="ig.source_name">
+                      <span style="margin-left: 6px; opacity: 0.8;" x-text="'· 源: ' + ig.source_name"></span>
+                    </template>
+                  </div>
+                </td>
+                <td>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span class="region-strategy-badge badge-auto">继承策略</span>
+                    <code class="font-mono region-user-pill" x-text="ig.username" @click="copyInheritedUser(ig)" title="点击复制认证账号（密码相同）"></code>
+                  </div>
+                </td>
+                <td>
+                  <div class="region-target-node">
+                    <span class="target-radio-dot auto-dot">●</span>
+                    <span class="target-name font-mono" :title="ig.now || '内核正在调度中...'" x-text="ig.now || '自动调度中...'"></span>
+                  </div>
+                </td>
+                <td>
+                  <div class="probe-squares-bar" :title="inheritedHistoryTooltip(ig)">
+                    <template x-for="(h, idx) in probeSquares(ig.probe)" :key="'ih-' + idx">
+                      <span class="probe-square-dot" :style="{ background: probeSquareColor(h) }" :title="probeSquareDotTitle(h)"></span>
+                    </template>
+                  </div>
+                </td>
+                <td>
+                  <template x-if="ig.probe && ig.probe.latency_ms">
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                      <span class="badge font-mono" :class="probeBadgeClass(ig.probe)" x-text="ig.probe.latency_ms + 'ms'"></span>
+                      <template x-if="ig.probe.outbound_ip">
+                        <span class="font-mono text-dim" style="font-size: 11px;" x-text="ig.probe.outbound_ip"></span>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="!ig.probe || !ig.probe.latency_ms">
+                    <span class="text-dim font-mono" style="font-size: 11px;" x-text="ig.probe && ig.probe.error ? '失败' : '未测速'"></span>
+                  </template>
+                </td>
+                <td style="text-align: right;">
+                  <div class="action-btn-group">
+                    <button @click="copyText(ig.proxy, '已复制 ' + ig.username + ' 代理接入串')" class="btn-ghost" title="复制接入串"><i data-lucide="link" style="width: 12px; height: 12px;"></i></button>
+                    <button @click="copyText(ig.curl, '已复制 cURL 测试命令')" class="btn-ghost" title="复制测试 cURL 命令"><i data-lucide="terminal" style="width: 12px; height: 12px;"></i></button>
+                    <button @click="probeInheritedGroup(ig)" :disabled="ig.probing" class="btn-ghost" title="测速探测该分组"><i data-lucide="activity" style="width: 12px; height: 12px;" :class="{ 'spin': ig.probing }"></i></button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </template>
+        </table>
+
+        <!-- Cards view -->
+        <div class="region-cards">
+          <template x-for="ig in filteredInheritedGroups" :key="'icard-' + ig.name">
+            <div class="region-card" style="border-top: 2px solid var(--accent);">
+              <div class="rc-header">
+                <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--accent);"></span>
+                <span class="font-mono rc-title" x-text="ig.name"></span>
+                <span class="badge" style="margin-left: 6px; font-size: 10px; border-color: var(--accent); color: var(--accent);" x-text="ig.strategy_desc"></span>
+                <span class="rc-count" x-text="ig.node_count + ' 节点 · ' + ig.healthy_count + ' 活'"></span>
+              </div>
+              <div class="rc-line" style="display: flex; align-items: center; justify-content: space-between;">
+                <span class="text-dim" style="font-size: 10px;" x-text="ig.source_name ? '来源: ' + ig.source_name : '基础配置'"></span>
+                <template x-if="ig.probe && ig.probe.latency_ms">
+                  <span class="badge font-mono" :class="probeBadgeClass(ig.probe)" x-text="ig.probe.latency_ms + 'ms'"></span>
+                </template>
+              </div>
+              <div class="rc-user-row">
+                <span class="region-strategy-badge badge-auto">凭证</span>
+                <code class="font-mono" x-text="ig.username" @click="copyInheritedUser(ig)" title="点击复制账号（密码相同）"></code>
+                <span class="rc-now" :title="ig.now || '未选中'" x-text="ig.now ? '→ ' + ig.now : '→ -'"></span>
+                <div class="probe-squares-bar" style="margin-left: auto;" :title="inheritedHistoryTooltip(ig)">
+                  <template x-for="(h, idx) in probeSquares(ig.probe)" :key="'ic-h-' + idx">
+                    <span class="probe-square-dot" :style="{ background: probeSquareColor(h) }" :title="probeSquareDotTitle(h)"></span>
+                  </template>
+                </div>
+              </div>
+              <div class="rc-actions">
+                <button @click="copyText(ig.proxy, '已复制 ' + ig.username + ' 代理接入串')" :title="ig.proxy" class="btn-ghost" style="height: 22px; padding: 0 8px; font-size: 11px;"><i data-lucide="link" style="width: 11px; height: 11px; margin-right: 3px;"></i>接入串</button>
+                <button @click="copyText(ig.curl, '已复制 cURL 测试命令')" :title="ig.curl" class="btn-ghost" style="height: 22px; padding: 0 6px; font-size: 11px;"><i data-lucide="terminal" style="width: 11px; height: 11px; margin-right: 2px;"></i>cURL</button>
+                <button @click="probeInheritedGroup(ig)" :disabled="ig.probing" class="btn-ghost" style="height: 22px; padding: 0 8px; font-size: 11px; margin-left: auto;"><i data-lucide="activity" style="width: 11px; height: 11px; margin-right: 3px;" :class="{ 'spin': ig.probing }"></i>探测</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <!-- Footer -->
@@ -3906,7 +4062,12 @@
     (function() {
       const _origFetch = window.fetch;
       window.fetch = async function(url, options = {}) {
-        const token = localStorage.getItem('meow_token');
+        let token = localStorage.getItem('meow_token');
+        if (!token) {
+          const qp = new URLSearchParams(location.search);
+          token = qp.get('token');
+          if (token) localStorage.setItem('meow_token', token);
+        }
         if (token && typeof url === 'string') {
           if (!options.headers) {
             options.headers = { 'Authorization': 'Bearer ' + token };
@@ -4033,6 +4194,10 @@
         isSpeedProbing: false,
         speedGroups: [],
         speedSearch: '',
+        inheritedCards: false,
+        isInheritedProbing: false,
+        inheritedGroups: [],
+        inheritedSearch: '',
         ipCurrentPage: 1,
         ipPageSize: 15,
         ipPageJumpInput: '',
@@ -4085,14 +4250,18 @@
 
         init() {
           this.applyTheme(this.currentTheme);
+          const qp = new URLSearchParams(location.search);
+          if (qp.has('token') && qp.get('token')) {
+            localStorage.setItem('meow_token', qp.get('token'));
+          }
           this.fetchAuthStatus();
           // Allow deep-linking: ?regions=cards / ?view=nodes / ?view=ip_groups
-          const qp = new URLSearchParams(location.search);
           if (qp.get('regions') === 'cards') this.regionCards = true;
           if (qp.get('view') === 'nodes') this.activeView = 'nodes';
           if (qp.get('view') === 'ip_groups') this.activeView = 'ip_groups';
           if (qp.get('view') === 'level_groups') this.activeView = 'level_groups';
           if (qp.get('view') === 'speed_groups') this.activeView = 'speed_groups';
+          if (qp.get('view') === 'inherited_groups') this.activeView = 'inherited_groups';
           if (qp.get('health') === '1') { this.healthModalOpen = true; }
           if (qp.get('modal') === 'sources') { this.openSourcesModal(); }
           if (qp.get('modal') === 'preview') { this.openConfigHub('preview'); }
@@ -4104,11 +4273,14 @@
           this.fetchSystemProxy();
           this.fetchLevelGroups();
           this.fetchSpeedGroups();
+          this.fetchInheritedGroups();
           this.fetchHealth(true);
 
           this.$watch('subMode', () => { this.renderSubQrCode(); });
 
-          if (this.activeView === 'speed_groups') {
+          if (this.activeView === 'inherited_groups') {
+            this.fetchInheritedGroups();
+          } else if (this.activeView === 'speed_groups') {
             this.fetchSpeedGroups();
           } else if (this.activeView === 'level_groups') {
             this.fetchLevelGroups();
@@ -5291,6 +5463,112 @@
         copySpeedUser(sg, idx) {
           const u = sg.users[idx];
           if (u) this.copyText(u.username, `已复制账号 ${u.username}（密码相同）`);
+        },
+
+        get filteredInheritedGroups() {
+          const q = this.inheritedSearch.trim().toLowerCase();
+          if (!q) return this.inheritedGroups;
+          return this.inheritedGroups.filter(g =>
+            g.name.toLowerCase().includes(q) ||
+            g.username.toLowerCase().includes(q) ||
+            g.group_type.toLowerCase().includes(q) ||
+            g.strategy_desc.toLowerCase().includes(q) ||
+            (g.source_name && g.source_name.toLowerCase().includes(q)) ||
+            (Array.isArray(g.nodes) && g.nodes.some(n => n.toLowerCase().includes(q)))
+          );
+        },
+
+        get inheritedGroupTotalNodes() {
+          return this.inheritedGroups.reduce((s, g) => s + g.node_count, 0);
+        },
+
+        async switchToInheritedGroups() {
+          this.activeView = 'inherited_groups';
+          if (this.inheritedGroups.length === 0) await this.fetchInheritedGroups();
+          this.$nextTick(() => lucide.createIcons());
+        },
+
+        async fetchInheritedGroups() {
+          try {
+            const res = await fetch('/api/inherited-groups');
+            if (res.ok) {
+              const json = await res.json();
+              this.inheritedGroups = (json.data || []).map(g => ({
+                ...g,
+                probing: false,
+                probe: g.probe || null
+              }));
+            } else {
+              this.showToast('继承分组加载失败: ' + await res.text(), 'error');
+            }
+          } catch (e) {
+            console.error('Failed to fetch inherited groups:', e);
+          }
+          this.$nextTick(() => lucide.createIcons());
+        },
+
+        async probeInheritedGroup(ig) {
+          ig.probing = true;
+          try {
+            const res = await fetch(`/api/inherited-groups/${encodeURIComponent(ig.username)}/probe`, { method: 'POST' });
+            if (res.ok) {
+              const json = await res.json();
+              ig.probe = json.data;
+              const p = json.data || {};
+              const spd = p.speed_formatted ? ` ⚡ ${p.speed_formatted}` : '';
+              const lat = p.latency_ms ? ` (${p.latency_ms}ms)` : '';
+              const ip = p.outbound_ip ? ` IP: ${p.outbound_ip}` : '';
+              const err = p.error ? ` 失败: ${p.error}` : '';
+              this.showToast(`继承分组 [${ig.name}] 探测完成${spd}${lat}${ip}${err}`, p.error ? 'error' : 'success');
+            } else {
+              this.showToast(`探测继承分组 [${ig.name}] 失败: ` + await res.text(), 'error');
+            }
+          } catch (e) {
+            this.showToast('网络错误: ' + e.message, 'error');
+          } finally {
+            ig.probing = false;
+            this.$nextTick(() => lucide.createIcons());
+          }
+        },
+
+        async probeAllInheritedGroups() {
+          if (this.isInheritedProbing) return;
+          this.isInheritedProbing = true;
+          this.showToast('已启动全部继承分组探测...', 'info');
+          try {
+            const res = await fetch('/api/inherited-groups/probe-all', { method: 'POST' });
+            if (!res.ok) {
+              this.showToast('启动继承分组探测失败: ' + await res.text(), 'error');
+              this.isInheritedProbing = false;
+              return;
+            }
+            let polls = 0;
+            const timer = setInterval(async () => {
+              polls++;
+              await this.fetchInheritedGroups();
+              if (polls >= 8) {
+                clearInterval(timer);
+                this.isInheritedProbing = false;
+                this.showToast('继承分组探测完成', 'success');
+              }
+            }, 2000);
+          } catch (e) {
+            this.showToast('网络错误: ' + e.message, 'error');
+            this.isInheritedProbing = false;
+          }
+        },
+
+        copyInheritedUser(ig) {
+          this.copyText(ig.username, `已复制账号 ${ig.username}（密码相同）`);
+        },
+
+        inheritedHistoryTooltip(ig) {
+          const probe = ig.probe || null;
+          const hist = probe && probe.history ? probe.history : [];
+          if (hist.length === 0) return '尚未探测';
+          return hist.slice(-10).map(h =>
+            `${new Date(h.checked_at).toLocaleTimeString()} ${h.ok ? '✓ ' + (h.speed_formatted ? '⚡ ' + h.speed_formatted + ' ' : '') + (h.latency_ms ?? '-') + 'ms' : '✗ 失败'}`
+          ).join('\n');
         },
 
         get paginatedNodes() {

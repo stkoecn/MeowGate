@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod groups;
+pub mod inherited_groups;
 pub mod ip_groups;
 pub mod level_groups;
 pub mod rules;

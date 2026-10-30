@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod config;
 pub mod health;
+pub mod inherited_groups;
 pub mod ip_groups;
 pub mod level_groups;
 pub mod nodes;

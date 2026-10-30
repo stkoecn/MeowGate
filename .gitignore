@@ -33,3 +33,9 @@ temp_*
 .pi/
 .vscode/
 .idea/
+
+# Geo databases (downloaded on runtime)
+*.dat
+*.mmdb
+*.metadb
+

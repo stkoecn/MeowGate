@@ -86,6 +86,7 @@ impl TemplateRenderer {
             ip_groups,
             &[],
             &[],
+            &[],
             unavailable,
             base_config,
             mixed_port,
@@ -105,6 +106,7 @@ impl TemplateRenderer {
         ip_groups: &[crate::generator::ip_groups::IpGroup],
         level_groups: &[crate::generator::level_groups::LevelGroup],
         speed_groups: &[crate::generator::speed_groups::SpeedGroup],
+        inherited_groups: &[crate::generator::inherited_groups::InheritedGroup],
         unavailable: &HashSet<String>,
         base_config: Option<&str>,
         mixed_port: u16,
@@ -182,6 +184,15 @@ impl TemplateRenderer {
         }
         let spd_users = crate::generator::speed_groups::speed_users(speed_groups);
         for user in &spd_users {
+            writeln!(
+                out,
+                "  - \"{}:{}\"",
+                Self::escape_inner(&user.username),
+                Self::escape_inner(&user.password)
+            ).unwrap();
+        }
+        let inh_users = crate::generator::inherited_groups::inherited_users(inherited_groups);
+        for user in &inh_users {
             writeln!(
                 out,
                 "  - \"{}:{}\"",
@@ -512,6 +523,9 @@ impl TemplateRenderer {
             valid_gateway_targets.insert(crate::generator::speed_groups::speed_group_name(&sg.code, false));
             valid_gateway_targets.insert(crate::generator::speed_groups::speed_group_name(&sg.code, true));
         }
+        for ig in inherited_groups {
+            valid_gateway_targets.insert(ig.name.clone());
+        }
         for ig in ip_groups {
             valid_gateway_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, false));
             valid_gateway_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, true));
@@ -607,13 +621,27 @@ impl TemplateRenderer {
             }
         }
 
-        // 5f. Standard China and user private direct rules (for unauthenticated / guest proxy traffic)
+        // 5f. Inherited group rules (IN-USER for base_config custom groups)
+        for ig in inherited_groups {
+            let rule = format!("IN-USER,{},{}", ig.username, ig.name);
+            writeln!(out, "{}", Self::format_yaml_rule(&rule)).unwrap();
+            for alias in &ig.aliases {
+                if alias != &ig.username {
+                    let alias_rule = format!("IN-USER,{},{}", alias, ig.name);
+                    writeln!(out, "{}", Self::format_yaml_rule(&alias_rule)).unwrap();
+                }
+            }
+        }
+
+        // 5g. Standard China and user private direct rules (for unauthenticated / guest proxy traffic)
         let has_geoip = std::path::Path::new("geoip.metadb").exists()
             || std::path::Path::new("geoip.dat").exists()
             || std::path::Path::new("Country.mmdb").exists();
+        let has_geosite = std::path::Path::new("geosite.dat").exists()
+            || std::path::Path::new("GeoSite.dat").exists();
         Self::write_standard_direct_rules(&mut out, has_geoip);
 
-        // 5g. Guest unauthenticated rule: routes to dynamic 🚀 节点选择 group
+        // 5h. Guest unauthenticated rule: routes to dynamic 🚀 节点选择 group
         let guest_rule = format!("IN-USER,guest,{}", main_selector_name);
         writeln!(out, "{}", Self::format_yaml_rule(&guest_rule)).unwrap();
 
@@ -623,6 +651,10 @@ impl TemplateRenderer {
             if let Some(serde_yaml::Value::Sequence(existing_rules)) = map.get(&serde_yaml::Value::String("rules".to_string())) {
                 for r in existing_rules {
                     if let Some(s) = r.as_str() {
+                        // Skip GEOIP/GEOSITE rules if local machine has no database file to prevent Mihomo reload rejection
+                        if (!has_geoip && s.starts_with("GEOIP,")) || (!has_geosite && s.starts_with("GEOSITE,")) {
+                            continue;
+                        }
                         has_base_rules = true;
                         writeln!(out, "{}", Self::format_yaml_rule(s)).unwrap();
                     }
@@ -862,6 +894,7 @@ impl TemplateRenderer {
         ip_groups: &[crate::generator::ip_groups::IpGroup],
         level_groups: &[crate::generator::level_groups::LevelGroup],
         speed_groups: &[crate::generator::speed_groups::SpeedGroup],
+        inherited_groups: &[crate::generator::inherited_groups::InheritedGroup],
         unavailable: &HashSet<String>,
         base_config: Option<&str>,
     ) -> Result<String> {
@@ -1197,6 +1230,9 @@ impl TemplateRenderer {
         for sg in speed_groups {
             valid_sub_targets.insert(crate::generator::speed_groups::speed_group_name(&sg.code, false));
             valid_sub_targets.insert(crate::generator::speed_groups::speed_group_name(&sg.code, true));
+        }
+        for ig in inherited_groups {
+            valid_sub_targets.insert(ig.name.clone());
         }
         for ig in ip_groups {
             valid_sub_targets.insert(crate::generator::ip_groups::ip_group_name(&ig.sanitized_ip, false));

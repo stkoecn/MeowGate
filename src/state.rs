@@ -551,6 +551,7 @@ impl AppState {
             &unavailable,
         );
         let speed_groups = self.list_speed_groups().await;
+        let inherited_groups = self.list_inherited_groups().await;
 
         let base_config = self.get_effective_base_config().await;
 
@@ -562,6 +563,7 @@ impl AppState {
             &ip_groups,
             &level_groups,
             &speed_groups,
+            &inherited_groups,
             &unavailable,
             base_config.as_deref(),
             self.config.meow.mixed_port,
@@ -601,6 +603,7 @@ impl AppState {
             &unavailable,
         );
         let speed_groups = self.list_speed_groups().await;
+        let inherited_groups = self.list_inherited_groups().await;
 
         let base_config = self.get_effective_base_config().await;
 
@@ -611,6 +614,7 @@ impl AppState {
             &ip_groups,
             &level_groups,
             &speed_groups,
+            &inherited_groups,
             &unavailable,
             base_config.as_deref(),
         )
@@ -648,6 +652,44 @@ impl AppState {
         let traffic = self.traffic_stats.read().await.clone();
         let unavailable = self.health.unavailable().await;
         crate::generator::speed_groups::build_speed_groups_filtered(&nodes, &probes, &traffic, &unavailable)
+    }
+
+    /// Current inherited custom groups parsed from base config sources (where is_base is true)
+    pub async fn list_inherited_groups(&self) -> Vec<crate::generator::inherited_groups::InheritedGroup> {
+        let sources = self.db.get_all_sources().await.unwrap_or_default();
+        let unavailable = self.health.unavailable().await;
+        let mut all_groups = Vec::new();
+
+        for s in sources {
+            if s.enabled && s.is_base {
+                if let Some(content) = self.fetch_or_read_source_content(&s.target).await {
+                    let groups = crate::generator::inherited_groups::extract_inherited_groups(
+                        Some(&content),
+                        &unavailable,
+                        Some(&s.name),
+                    );
+                    all_groups.extend(groups);
+                }
+            }
+        }
+
+        // Fallback to base_config_path if no source is_base was found
+        if all_groups.is_empty() {
+            if let Some(path) = &self.config.meow.base_config_path {
+                if path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        let groups = crate::generator::inherited_groups::extract_inherited_groups(
+                            Some(&content),
+                            &unavailable,
+                            path.file_name().and_then(|f| f.to_str()),
+                        );
+                        all_groups.extend(groups);
+                    }
+                }
+            }
+        }
+
+        all_groups
     }
 
     /// Generates and writes config to disk, then triggers reload if meow-rs is running

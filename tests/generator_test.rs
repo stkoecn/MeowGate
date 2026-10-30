@@ -232,6 +232,7 @@ fn test_level_group_generation() {
         &[],
         &level_groups,
         &[],
+        &[],
         &HashSet::new(),
         None,
         9565,
@@ -337,6 +338,7 @@ fn test_clash_subscription_generation() {
         &[],
         &[],
         &[],
+        &[],
         &HashSet::new(),
         None,
     ).expect("Render subscription failed");
@@ -438,6 +440,7 @@ fn test_speed_group_generation() {
         &[],
         &[],
         &speed_groups,
+        &[],
         &HashSet::new(),
         None,
         9565,
@@ -450,4 +453,98 @@ fn test_speed_group_generation() {
     assert!(yaml.contains("🚀 高速节点 (自动选优)"));
     assert!(yaml.contains("🛡️ 高速节点 (故障转移)"));
     assert!(yaml.contains("IN-USER,fast,"));
+}
+
+#[test]
+fn test_inherited_group_generation() {
+    use meowgate::generator::inherited_groups::extract_inherited_groups;
+    use std::collections::HashSet;
+
+    let base_yaml = r#"
+proxy-groups:
+  - name: us1
+    type: load-balance
+    strategy: round-robin
+    proxies:
+      - us1-01
+      - us1-02
+  - name: us2
+    type: fallback
+    url: https://cp.cloudflare.com/generate_204
+    interval: 120
+    proxies:
+      - us2-01
+      - us2-02
+"#;
+
+    let groups = extract_inherited_groups(Some(base_yaml), &HashSet::new(), Some("vps.yaml"));
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].name, "us1");
+    assert_eq!(groups[0].username, "us1");
+    assert_eq!(groups[0].group_type, "load-balance");
+    assert_eq!(groups[0].source_name.as_deref(), Some("vps.yaml"));
+    assert_eq!(groups[0].node_count, 2);
+    assert!(groups[0].aliases.contains(&"g_us1".to_string()));
+
+    let nodes = vec![
+        Node {
+            name: "us1-01".to_string(),
+            proxy_type: "ss".to_string(),
+            server: "1.1.1.1".to_string(),
+            port: 1080,
+            extra: Default::default(),
+        },
+        Node {
+            name: "us1-02".to_string(),
+            proxy_type: "ss".to_string(),
+            server: "1.1.1.2".to_string(),
+            port: 1080,
+            extra: Default::default(),
+        },
+        Node {
+            name: "us2-01".to_string(),
+            proxy_type: "ss".to_string(),
+            server: "1.1.1.3".to_string(),
+            port: 1080,
+            extra: Default::default(),
+        },
+        Node {
+            name: "us2-02".to_string(),
+            proxy_type: "ss".to_string(),
+            server: "1.1.1.4".to_string(),
+            port: 1080,
+            extra: Default::default(),
+        },
+    ];
+
+    let yaml = TemplateRenderer::render_with_all_groups_cached(
+        &nodes,
+        None,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &groups,
+        &HashSet::new(),
+        Some(base_yaml),
+        9565,
+        "DIRECT",
+    ).expect("Render failed");
+
+    // Check credentials in authentication:
+    assert!(yaml.contains("us1:us1"));
+    assert!(yaml.contains("g_us1:g_us1"));
+    assert!(yaml.contains("us2:us2"));
+    assert!(yaml.contains("g_us2:g_us2"));
+
+    // Check IN-USER rules
+    assert!(yaml.contains("IN-USER,us1,us1"));
+    assert!(yaml.contains("IN-USER,g_us1,us1"));
+    assert!(yaml.contains("IN-USER,us2,us2"));
+    assert!(yaml.contains("IN-USER,g_us2,us2"));
+
+    // Check group in proxy-groups
+    assert!(yaml.contains("name: us1"));
+    assert!(yaml.contains("name: us2"));
 }

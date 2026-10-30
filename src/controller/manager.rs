@@ -117,11 +117,18 @@ impl CoreManager {
             }
         };
 
-        info!("Starting embedded core: {:?} -f {:?}", core_exe, config_path);
+        // Clean up Windows verbatim prefix (\\?\) which breaks Go/Mihomo internal path concatenation
+        let clean_path_str = config_path
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+        let clean_config_path = PathBuf::from(clean_path_str);
+
+        info!("Starting embedded core: {:?} -f {:?}", core_exe, clean_config_path);
 
         let mut cmd = Command::new(&core_exe);
-        cmd.arg("-f").arg(config_path);
-        if let Some(parent) = config_path.parent() {
+        cmd.arg("-f").arg(&clean_config_path);
+        if let Some(parent) = clean_config_path.parent() {
             if !parent.as_os_str().is_empty() {
                 cmd.arg("-d").arg(parent);
             }

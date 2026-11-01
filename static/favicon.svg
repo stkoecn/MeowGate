@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient: Cyber Gateway Blue to Violet -->
+    <linearGradient id="gateGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="50%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+
+    <!-- Ear Inner / Accent Gradient: Energetic Coral -->
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="100%" stop-color="#fb7185" />
+    </linearGradient>
+
+    <!-- Cat Head Surface Gradient -->
+    <linearGradient id="headGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#e2e8f0" />
+    </linearGradient>
+
+    <!-- Eyes Gradient: Cyber Cyan -->
+    <linearGradient id="eyeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+
+    <!-- Drop Shadow for Dimensionality -->
+    <filter id="badgeShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#312e81" flood-opacity="0.4" />
+    </filter>
+
+    <filter id="headShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#1e1b4b" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- 1. Squircle Container / App Icon Base -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#gateGrad)" filter="url(#badgeShadow)" />
+  <rect x="8.5" y="8.5" width="111" height="111" rx="27.5" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" />
+
+  <!-- 2. Gateway Circuit / Portal Rings (Background Texture) -->
+  <circle cx="64" cy="64" r="44" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2" stroke-dasharray="6 4" />
+  <circle cx="64" cy="64" r="50" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+
+  <!-- 3. Gateway Nodes / Crossbar Dots -->
+  <circle cx="64" cy="18" r="2.5" fill="rgba(255,255,255,0.5)" />
+  <circle cx="20" cy="64" r="2.5" fill="rgba(255,255,255,0.5)" />
+  <circle cx="108" cy="64" r="2.5" fill="rgba(255,255,255,0.5)" />
+
+  <!-- 4. Cat Silhouette & Head Structure -->
+  <g filter="url(#headShadow)">
+    <!-- Cat Ears (Outer) -->
+    <polygon points="32,68 34,26 60,48" fill="url(#headGrad)" stroke="#cbd5e1" stroke-width="1" stroke-linejoin="round" />
+    <polygon points="96,68 94,26 68,48" fill="url(#headGrad)" stroke="#cbd5e1" stroke-width="1" stroke-linejoin="round" />
+
+    <!-- Cat Ears (Inner / Pink Coral Accent) -->
+    <polygon points="37,60 39,33 54,49" fill="url(#accentGrad)" opacity="0.9" />
+    <polygon points="91,60 89,33 74,49" fill="url(#accentGrad)" opacity="0.9" />
+
+    <!-- Cat Head (Main Body / Rounded Cheek Base) -->
+    <path d="M 32,66 
+             C 30,50 44,46 64,46 
+             C 84,46 98,50 96,66 
+             C 98,84 84,98 64,98 
+             C 44,98 30,84 32,66 Z" 
+          fill="url(#headGrad)" />
+  </g>
+
+  <!-- 5. Sleek Cyber Eyes -->
+  <!-- Left Eye -->
+  <ellipse cx="48" cy="68" rx="6.5" ry="8.5" fill="#0f172a" />
+  <ellipse cx="48" cy="68" rx="4.5" ry="6.5" fill="url(#eyeGrad)" />
+  <circle cx="50" cy="65.5" r="2.2" fill="#ffffff" />
+  <circle cx="46.5" cy="70.5" r="1.1" fill="#ffffff" opacity="0.7" />
+
+  <!-- Right Eye -->
+  <ellipse cx="80" cy="68" rx="6.5" ry="8.5" fill="#0f172a" />
+  <ellipse cx="80" cy="68" rx="4.5" ry="6.5" fill="url(#eyeGrad)" />
+  <circle cx="82" cy="65.5" r="2.2" fill="#ffffff" />
+  <circle cx="78.5" cy="70.5" r="1.1" fill="#ffffff" opacity="0.7" />
+
+  <!-- 6. Cute Nose & Gateway Whiskers -->
+  <!-- Nose -->
+  <polygon points="64,77 61,74 67,74" fill="url(#accentGrad)" />
+
+  <!-- Mouth Lines -->
+  <path d="M 64,77 Q 61,82 57,80 M 64,77 Q 67,82 71,80" 
+        fill="none" stroke="#64748b" stroke-width="1.8" stroke-linecap="round" />
+
+  <!-- Whiskers as Network Streamlines -->
+  <!-- Left Whiskers -->
+  <line x1="22" y1="70" x2="38" y2="72" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-linecap="round" />
+  <line x1="24" y1="78" x2="39" y2="76" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-linecap="round" />
+
+  <!-- Right Whiskers -->
+  <line x1="106" y1="70" x2="90" y2="72" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-linecap="round" />
+  <line x1="104" y1="78" x2="89" y2="76" stroke="rgba(255,255,255,0.7)" stroke-width="2" stroke-linecap="round" />
+
+  <!-- 7. Forehead Gateway Beacon (Router Status Jewel) -->
+  <polygon points="64,52 67.5,56 64,60 60.5,56" fill="#10b981" />
+  <circle cx="64" cy="56" r="1.2" fill="#ffffff" />
+</svg>

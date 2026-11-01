@@ -25,6 +25,8 @@ temp_*
 
 # Screenshots and browser debug directories
 *.png
+!static/*.png
+!static/flags/*.png
 .chrome-*
 .chrome-tmp/
 
